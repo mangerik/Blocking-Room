@@ -264,3 +264,29 @@ button[hidden]{display:none!important}
   .prop-add-row select{min-height:44px}
   .key-target button{min-height:44px}
 }
+
+/* ---------- Fase 5: dialog ekspor (F5-02/EX-01) ----------
+   Dialog memakai token warna yang sama dengan panel riwayat/metrik sehingga
+   kontras yang sudah lolos audit F6-04 tetap berlaku. Semua tombol ≥44 px pada
+   layout sentuh, dan seluruh isi dialog bersifat `hidden` selama tidak dipakai. */
+.export-dialog{position:fixed;right:18px;top:78px;z-index:32;width:370px;max-height:min(80vh,720px);overflow:auto;background:#fbfaf4;border:1px solid var(--line);border-radius:6px;padding:14px;box-shadow:0 10px 30px #2533230f}
+.export-dialog[hidden]{display:none}
+.export-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;font-size:12px}
+.export-group{border:1px solid var(--line);border-radius:5px;padding:10px 12px 4px;margin:0 0 12px}
+.export-group legend{font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);padding:0 4px}
+.export-shots{max-height:150px;overflow:auto;margin-bottom:6px}
+.export-check{display:flex;align-items:flex-start;gap:8px;font-size:10px;color:#40453d;line-height:1.6;margin:0 0 8px}
+.export-check input{width:auto;min-width:18px;min-height:18px;margin-top:1px}
+.export-check.is-blocked{color:var(--muted)}
+.export-dialog .field{margin-bottom:10px}
+.export-summary{font-size:10px;line-height:1.6;color:var(--muted);margin:0 0 8px}
+.export-progress-row{display:flex;align-items:center;gap:9px;margin-bottom:8px;font-size:10px;font-variant-numeric:tabular-nums}
+.export-progress-row[hidden]{display:none}
+.export-progress-row progress{flex:1;margin-top:0}
+.export-message{font-size:10px;line-height:1.6;margin:0}
+.export-message[data-tone="error"]{color:#8f4527}
+.export-message[data-tone="warn"]{color:#7d5a24}
+.export-message[data-tone="ok"]{color:#3f5c46}
+.export-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+@media(max-width:850px){.export-dialog{right:8px;left:8px;width:auto;top:66px}}
+@media(max-width:540px){.export-dialog button{min-height:44px}.export-dialog select,.export-dialog input[type="number"]{min-height:44px}}

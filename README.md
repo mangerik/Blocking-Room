@@ -293,20 +293,34 @@ Important persistence behavior:
 
 ## Video export
 
-**Ekspor video** records one real-time pass of the active camera at 1280 × 720 with a target of 30 fps. The export omits editor labels, selection rings, direction arrows, camera helpers, movement paths, grid, and UI.
+**Ekspor video** opens an export dialog. The default path is a **deterministic offline render**: every frame is sampled explicitly at `t = frame / fps`, rendered through the same `sampleScene()` used by the preview, encoded with WebCodecs, and written into a WebM container by the project's own muxer. A 10-second shot at 30 fps contains exactly 300 frames and a container duration of 10.000 seconds, verified with `ffprobe` in `tests/export-browser.mjs`.
 
-The encoder is selected with `MediaRecorder.isTypeSupported()`. Chrome typically produces WebM using VP9 or VP8; MP4 is used only when the current browser reports it as recordable.
+The dialog offers:
 
-Current export constraints:
+- **Shots** — one shot, several shots (rendered as a sequential queue with per-job progress), or none of the shots that have no camera. Shots without a camera cannot be selected.
+- **Range** — the whole shot, a frame range (inclusive), or a range in seconds. Ranges beyond the shot are clamped with a message; reversed ranges are rejected.
+- **Resolution** — 1280 × 720 (default) or 1920 × 1080, always matching the shot's aspect ratio, so 9:16 exports as 720 × 1280 or 1080 × 1920. Every dimension is rounded to an even number, which H.264 requires.
+- **Frame rate** — follow the shot, or 24 / 25 / 30. Only integer rates are offered: the WebM timestamp scale is milliseconds, so 29.97 and 23.976 would drift.
+- **Codec** — two independent capability lists. Deterministic codecs are probed with `VideoEncoder.isConfigSupported()` for the exact resolution and frame rate in use (VP9 by default, plus VP8, AV1, and H.264-in-WebM). The real-time fallback is probed separately with `MediaRecorder.isTypeSupported()`. MP4 is listed as **unavailable, with the reason**, because an approved MP4 muxer does not exist yet.
+- **Production reference (optional)** — burn-in of scene · shot, lens, and `MM:SS:FF` timecode; PNG storyboard frames (first, middle, last); and a project shot list as JSON and CSV.
 
-- Export takes approximately the full scene duration.
-- Keep the page active until recording completes.
-- Smoothness depends on device and browser performance.
+Editor overlays — movement paths, grid, selection rings, direction arrows, camera helpers, labels, safe area, and UI — are **excluded unless "Sertakan overlay editor" is ticked**.
+
+Exported files are named `<project>_<scene>_<shot>.webm` after sanitizing each part.
+
+When the export starts, the document is deep-cloned. Editing the scene while a job runs cannot change that job's output, and the snapshot is also stored as a revision labelled `export`.
+
+Progress reports the current job and frame (`Shot 1/2 · frame 45/300`), the job can be cancelled, and a failed export offers **Coba lagi**. "Ekspor selesai" is only shown once the blob exists.
+
+### Real-time fallback
+
+If `VideoEncoder` is unavailable, the dialog falls back to the original `MediaRecorder` path, labelled **"Real-time (tidak frame-akurat)"**. It records against wall-clock time, so the frame count is not guaranteed, the tab must stay visible, and the file name ends in `_realtime`. This path deliberately does not satisfy the deterministic export gate.
+
+Remaining export constraints:
+
 - Audio is not included.
-- Frame count is not yet guaranteed by an offline deterministic renderer.
-- Universal MP4 output is not available yet.
-
-The roadmap includes explicit resolution, frame-rate, range, and codec settings; immutable export snapshots; deterministic frame sampling; cancellation/retry; and reference overlays.
+- Universal MP4 output is not available yet; H.264 can be written into WebM, but player support for that combination is limited.
+- Encoded chunks are buffered in memory, so very long high-resolution shots are bounded by available RAM.
 
 ## Architecture
 
@@ -369,7 +383,16 @@ Key design rules:
 │   ├── timeline-engine.js     # Sampling, time formatting, keyframe helpers, aspect ratios
 │   ├── timeline-view.js       # Frame ruler window, snapping, bulk keyframe operations
 │   ├── shots.js               # Shot list operations and A/B comparison
-│   ├── export-service.js      # MediaRecorder video export
+│   ├── export-service.js      # MediaRecorder recording (real-time fallback only)
+│   ├── export/
+│   │   ├── ui.js              # Export dialog: shots, range, resolution, fps, codec
+│   │   ├── export-service.js  # Job orchestration, frame loop, queue, file naming
+│   │   ├── encoder.js         # Codec selection, VideoEncoder wrapper, backpressure
+│   │   ├── webm-muxer.js      # EBML/WebM muxer written for this project (no dependency)
+│   │   ├── frame-source.js    # Offscreen POV renderer bound to an immutable snapshot
+│   │   ├── realtime.js        # Labelled MediaRecorder fallback
+│   │   ├── burn-in.js         # Optional burn-in and safe-area overlay
+│   │   └── shot-list.js       # Shot list JSON/CSV and storyboard frame times
 │   ├── storage.js             # The only module touching localStorage
 │   ├── capabilities.js        # Central browser capability detection (no UA sniffing)
 │   ├── no-webgl.js            # Fallback screen when WebGL2 is unavailable
@@ -392,6 +415,7 @@ Key design rules:
 │   ├── capability-browser.mjs # Context loss, no-WebGL fallback, metrics, flags, v1 export
 │   ├── a11y-browser.mjs       # Accessibility audit: names, focus, contrast, touch targets
 │   ├── gate-r1-browser.mjs    # Release-gate bug hunt: lock bypass, data loss, migration
+│   ├── export-browser.mjs     # Deterministic export: 300 frames, frame equivalence, cancel
 │   └── perf-browser.mjs       # Performance harness (input latency, playback, open, memory)
 ├── docs/
 │   ├── PRD.md                 # Product requirements and release scope
@@ -441,7 +465,7 @@ Terminal 2:
 npm run test:browser
 ```
 
-Browser tests write screenshots, JSON fixtures, and test videos to `artifacts/`, which is ignored by Git. They cover the main Three.js workflow, keyframes, camera preview, lock/hide safety, direct viewport manipulation, undo/redo grouping, project round-trips, procedural walking, real doorway geometry, deletion, empty-camera recovery, responsive overflow, video download, version 1 migration, atomic autosave and recovery snapshots, multi-tab isolation, the dashboard journey (create, add scene, switch project, reload, duplicate, trash restore, package round-trip, legacy import, 44 px touch targets, 390 px layout), WebGL context loss and recovery, the no-WebGL fallback, local metrics, the dashboard feature flag, version 1 export for rollback, the accessibility audit, the shot and timeline suite (mode cue, isolated shot alternatives, bulk keyframe editing with one undo, frame snapping and clamping, snap grid, deterministic walking, doors, deleted camera targets, shots without a camera), and a release-gate bug hunt for lock bypass and data loss.
+Browser tests write screenshots, JSON fixtures, and test videos to `artifacts/`, which is ignored by Git. They cover the main Three.js workflow, keyframes, camera preview, lock/hide safety, direct viewport manipulation, undo/redo grouping, project round-trips, procedural walking, real doorway geometry, deletion, empty-camera recovery, responsive overflow, video download, version 1 migration, atomic autosave and recovery snapshots, multi-tab isolation, the dashboard journey (create, add scene, switch project, reload, duplicate, trash restore, package round-trip, legacy import, 44 px touch targets, 390 px layout), WebGL context loss and recovery, the no-WebGL fallback, local metrics, the dashboard feature flag, version 1 export for rollback, the accessibility audit, the shot and timeline suite (mode cue, isolated shot alternatives, bulk keyframe editing with one undo, frame snapping and clamping, snap grid, deterministic walking, doors, deleted camera targets, shots without a camera), a release-gate bug hunt for lock bypass and data loss, and the deterministic export suite (export dialog capability lists, 300 frames at exactly 10.000 seconds verified with `ffprobe`, first/middle/last frame equivalence against the preview, hidden objects, immutable snapshots, codec failure, cancellation, missing camera, range limits, batch queue with burn-in, storyboard and shot list, and the labelled real-time fallback).
 
 ### Performance harness
 
@@ -466,7 +490,7 @@ Tested locally during prototype development with Node.js 22 and stable Chrome on
 - Keyframe selection has no marquee; use click and Shift/Ctrl-click.
 - Rotation uses the shortest angular interpolation; intentional turns greater than 360 degrees are still not represented, even though orientation now has its own track (decision D-06).
 - Shortening duration trims later keyframes. Locked animated items must be unlocked before such trimming.
-- Video export is real-time and browser-dependent, with no audio or universal MP4 guarantee.
+- Video export has no audio and no universal MP4 guarantee; the deterministic path writes WebM only.
 - The UI is optimized for desktop. The responsive layout avoids horizontal overflow, but mobile touch ergonomics need further work.
 - Accessibility targets and Safari/Firefox compatibility have not yet completed a formal release audit.
 
@@ -479,11 +503,11 @@ The detailed roadmap lives in [plan.md](plan.md), with product rationale and acc
 | R0 | Safe editor: history, lock, visibility, rotation, final-view editing | Implemented baseline |
 | R0.1 | Procedural walking, full item deletion, door openings, wall warnings | Implemented baseline |
 | R1 | Local project dashboard, multiple scenes, IndexedDB, autosave recovery, trash, import/export packages | Implemented; release gate passed |
-| R2 | Shot list, isolated cameras/tracks, advanced timeline, props, cinematic formats, deterministic export | Shot list, isolated cameras/tracks, advanced timeline, per-property tracks, props, modular walls, and cinematic formats implemented; deterministic export outstanding |
+| R2 | Shot list, isolated cameras/tracks, advanced timeline, props, cinematic formats, deterministic export | Implemented; release gate R2 outstanding |
 | R3 | Optional cloud sync, revision history, roles, immutable review links, timestamp comments | Conditional on validation |
 | Exploration | GLB/rigs, audio cues, floor-plan underlays, continuity tools, AI-assisted blocking | Research backlog |
 
-Schema version 3 has shipped: one migration carries separate position/rotation tracks, hold/ease interpolation, prop entities, and modular walls together. The immediate next work is deterministic export (phase 5), then release gate R2. See `plan.md` and `docs/DATA-MODEL.md` section 8.
+Schema version 3 has shipped: one migration carries separate position/rotation tracks, hold/ease interpolation, prop entities, and modular walls together. Deterministic export (phase 5) has shipped as well. The immediate next work is release gate R2 and the pilot. See `plan.md` and `docs/DATA-MODEL.md` section 8.
 
 ## Contributing
 

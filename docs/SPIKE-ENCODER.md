@@ -1,6 +1,21 @@
 # Spike encoder — ekspor deterministik (F5-01)
 
 Status: selesai (riset + bukti probe). Tanggal: 2026-09-08.
+
+> **Pembaruan 2026-09-08 — riset ini sudah diimplementasikan (F5-02…F5-07).**
+> Kode produksi: `src/export/webm-muxer.js` (port §4), `src/export/encoder.js` (§2/§9),
+> `src/export/export-service.js` (§12), `src/export/frame-source.js`, `src/export/ui.js`,
+> `src/export/realtime.js` (§5), `src/export/burn-in.js`, `src/export/shot-list.js`.
+> Bukti hasil implementasi: `tests/export.test.js` (20 unit test struktur EBML) dan
+> `tests/export-browser.mjs` (300 frame, `ffprobe duration=10.000000`, kesetaraan frame
+> 0,53–0,67/255 terhadap preview). Tiga hal yang **berubah** dari sketsa spike:
+> 1. Loop ekspor melepas event loop lewat `MessageChannel`, bukan hanya `await` encoder —
+>    `setTimeout` dibatasi 1×/detik pada tab tersembunyi dan akan mematahkan janji §9.
+> 2. Muxer menulis `CodecPrivate` dari `metadata.decoderConfig.description` (dibutuhkan
+>    H.264 di WebM) dan memecah cluster bila jarak timestamp melewati int16 SimpleBlock.
+> 3. Render ekspor memakai **instans `SceneRenderer` terpisah** dari snapshot (F5-03),
+>    bukan renderer POV editor; ukuran buffer diatur `setExportSize`, aspect ratio tetap
+>    milik shot.
 Referensi: PRD EX-01, EX-02, §11 "Rendering"; plan.md Fase 5; keputusan D-04.
 Bukti mentah: `artifacts/encoder-probe.json` (headless), `artifacts/encoder-probe-headed.json` (headed),
 `artifacts/encoder-probe-webcodecs.webm` (contoh output muxer sendiri).

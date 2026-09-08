@@ -373,6 +373,37 @@ export class ProjectRepository {
       .reverse();
   }
 
+  /**
+   * Menyimpan satu revisi TANPA menyentuh store `documents`/`projects` (F5-03).
+   *
+   * Dipakai ekspor: job merender dari snapshot immutable, dan snapshot itu dicatat
+   * sebagai revisi berlabel supaya hasil video selalu dapat ditelusuri ke keadaan
+   * dokumen yang benar-benar dirender. Kegagalan di sini tidak boleh menggagalkan
+   * ekspor maupun penyimpanan dokumen — karena itu transaksinya terpisah.
+   *
+   * @param {object} doc dokumen yang dirender
+   * @param {{label?:string}} options label bebas (mis. `export`)
+   * @returns {Promise<string>} id revisi
+   */
+  saveRevision(doc, {label = null} = {}) {
+    const payload = clone(doc);
+    return this.transaction('revisions', 'readwrite', async stores => {
+      const id = this.newId();
+      await req(stores.revisions.put({
+        id,
+        projectId: payload.id,
+        parentId: null,
+        createdAt: this.uniqueStamp(this.now()),
+        schemaVersion: payload.schemaVersion ?? SCHEMA_VERSION,
+        title: payload.title,
+        label,
+        snapshot: payload,
+      }));
+      await this.prune(stores.revisions, payload.id);
+      return id;
+    });
+  }
+
   async getRevision(revisionId) {
     const row = await this.transaction('revisions', 'readonly', s => req(s.revisions.get(revisionId)));
     return row ?? null;

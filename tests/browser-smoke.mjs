@@ -18,8 +18,13 @@ assert.equal(await page.evaluate(()=>window.blockingRoom.getProject().camera.foc
 await page.locator('#play').click();await page.waitForTimeout(350);await page.locator('#play').click();assert.ok(await page.evaluate(()=>window.blockingRoom.getTime()>4));
 const projectDownload=page.waitForEvent('download');await page.locator('#save').click();const saved=await projectDownload;await saved.saveAs('artifacts/test-project.json');
 await page.locator('#duration').fill('1');await page.locator('#duration').press('Tab');
-const videoDownload=page.waitForEvent('download',{timeout:20000});await page.locator('#export').click();const video=await videoDownload;await video.saveAs('artifacts/test-export.webm');
+// Fase 5: tombol ekspor membuka dialog (EX-01); unduhan terjadi setelah "Mulai ekspor".
+await page.locator('#export').click();await page.waitForSelector('#export-dialog:not([hidden])');
+await page.waitForFunction(()=>[...document.querySelectorAll('#export-codec option')].some(o=>!o.disabled));
+const videoDownload=page.waitForEvent('download',{timeout:60000});await page.locator('#export-start').click();const video=await videoDownload;await video.saveAs('artifacts/test-export.webm');
 assert.ok(video.suggestedFilename().endsWith('.webm'));
+await page.waitForFunction(()=>/Ekspor selesai|Rekaman real-time/.test(document.querySelector('#export-message').textContent),null,{timeout:30000});
+await page.locator('#export-close').click();
 await page.locator('#file-input').setInputFiles('artifacts/test-project.json');await page.waitForFunction(()=>window.blockingRoom.getProject().duration===12);assert.equal(await page.evaluate(()=>window.blockingRoom.getProject().duration),12);
 await page.reload();await page.waitForSelector('#viewport canvas');assert.equal(await page.evaluate(()=>window.blockingRoom.getProject().actors.length),4);
 await page.setViewportSize({width:390,height:844});await page.screenshot({path:'artifacts/studio-mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);

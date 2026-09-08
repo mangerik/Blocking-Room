@@ -501,9 +501,31 @@ export class SceneRenderer {
     return value;
   }
 
+  /**
+   * Ukuran buffer ekspor (F5-04).
+   * Berbeda dari `setAspect`, ukurannya ditentukan preset resolusi ekspor
+   * (720p/1080p), tetapi aspect ratio kamera tetap milik shot sehingga crop hasil
+   * ekspor identik dengan preview.
+   */
+  setExportSize(ratio, width, height) {
+    this.aspectRatio = ratio;
+    this.aspect = aspectValue(ratio);
+    this.camera.aspect = this.aspect;
+    this.camera.updateProjectionMatrix();
+    this.povRenderer.setSize(width, height, false);
+    this.lastPovAt = -Infinity;
+    return {width, height, aspect: this.aspect};
+  }
+
   // ---------- rendering ----------
-  /** Render sudut pandang kamera final; dipakai preview kanan dan ekspor video. */
-  renderPOV(view, targetRenderer = this.povRenderer) {
+  /**
+   * Render sudut pandang kamera final; dipakai preview kanan dan ekspor video.
+   *
+   * `keepOverlays` HANYA dipakai ekspor "sertakan overlay editor" (EX-03): tanpa
+   * pilihan eksplisit itu, jalur gerak, gizmo, penanda kamera dan grid tidak
+   * pernah ikut terekam.
+   */
+  renderPOV(view, targetRenderer = this.povRenderer, {keepOverlays = false} = {}) {
     if (!view.camera) {
       targetRenderer.setClearColor('#30362f');
       targetRenderer.clear();
@@ -511,14 +533,16 @@ export class SceneRenderer {
     }
     const oldBackground = this.scene.background;
     this.scene.background = this.povBackground;
-    this.pathsGroup.visible = false;
+    this.pathsGroup.visible = keepOverlays && this.paths;
     this.helper.visible = false;
     this.cameraMarker.visible = false;
-    this.grid.visible = false;
+    this.grid.visible = keepOverlays;
     const rings = [];
-    this.actorsGroup.traverse(o => {
-      if (o.name === 'selection' || o.name === 'direction') {rings.push([o, o.visible]); o.visible = false;}
-    });
+    if (!keepOverlays) {
+      this.actorsGroup.traverse(o => {
+        if (o.name === 'selection' || o.name === 'direction') {rings.push([o, o.visible]); o.visible = false;}
+      });
+    }
     const materialState = [];
     this.roomsGroup.traverse(o => {
       if (o.isMesh && o.material.transparent) {
