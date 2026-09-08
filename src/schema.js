@@ -101,6 +101,9 @@ function validateKeys(keys, fields, duration, label) {
   for (const key of keys) {
     if (!isNumber(key.t, [0, duration])) fail(`Waktu keyframe ${label} di luar durasi shot.`);
     for (const field of fields) if (!isNumber(key[field], LIMITS.coordinate)) fail(`Nilai keyframe ${label} tidak valid.`);
+    // F4-06: focal length dapat di-key pada track kamera. Field ini OPSIONAL supaya
+    // dokumen lama tetap valid tanpa migrasi; bila ada, rentangnya sama dengan lensa.
+    if (key.focal !== undefined && !isNumber(key.focal, LIMITS.focal)) fail(`Focal length keyframe ${label} tidak valid.`);
   }
   keys.sort((a, b) => a.t - b.t);
   if (new Set(keys.map(k => k.t)).size !== keys.length) fail(`Waktu keyframe ${label} harus unik.`);

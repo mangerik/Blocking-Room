@@ -34,6 +34,9 @@ export const ENUMS = {
     'move', 'rotate', 'property', 'add_actor', 'add_room', 'add_camera', 'delete', 'rename',
     'lock', 'unlock', 'hide', 'show', 'keyframe', 'duration', 'door', 'record', 'import',
     'scene_add', 'scene_duplicate', 'scene_move', 'scene_remove', 'scene_rename', 'scene_switch',
+    // Fase 4 — shot list dan timeline lanjutan.
+    'shot_add', 'shot_duplicate', 'shot_move', 'shot_remove', 'shot_rename', 'shot_switch', 'shot_settings',
+    'keyframe_move', 'keyframe_copy', 'keyframe_paste', 'keyframe_delete', 'camera_preset', 'focal_key',
   ],
   source: ['pointer', 'keyboard', 'inspector', 'list', 'timeline', 'dashboard', 'menu', 'file'],
   direction: ['undo', 'redo'],

@@ -16,6 +16,8 @@ export class ExportService {
     this.stream = null;
     this.chunks = [];
     this.cancelled = false;
+    /** Ukuran canvas saat rekaman dimulai (F4-06): crop yang direkam = crop preview. */
+    this.dimensions = null;
   }
 
   /** Apakah browser mendukung perekaman canvas sama sekali. */
@@ -36,6 +38,12 @@ export class ExportService {
   start({mimeType, onStop, onError}) {
     this.chunks = [];
     this.cancelled = false;
+    // Aspect ratio milik shot (F4-06). Canvas POV sudah diubah ukurannya oleh
+    // SceneRenderer.setAspect sebelum ekspor dimulai, jadi merekam canvas ini
+    // otomatis menghasilkan crop yang sama dengan preview. Ukurannya dicatat di
+    // sini supaya pemanggil dapat melaporkannya dan supaya perubahan ukuran di
+    // tengah rekaman terlihat sebagai ketidaksesuaian, bukan diam-diam.
+    this.dimensions = {width: this.canvas.width, height: this.canvas.height};
     this.stream = this.canvas.captureStream(this.fps);
     this.recorder = new MediaRecorder(this.stream, {mimeType, videoBitsPerSecond: this.bitrate});
     this.recorder.ondataavailable = event => {if (event.data.size) this.chunks.push(event.data);};
@@ -52,7 +60,9 @@ export class ExportService {
   result() {
     const type = this.recorder?.mimeType ?? '';
     const blob = this.chunks.length ? new Blob(this.chunks, {type}) : null;
-    return {blob, extension: type.includes('mp4') ? 'mp4' : 'webm', cancelled: this.cancelled};
+    return {blob, extension: type.includes('mp4') ? 'mp4' : 'webm', cancelled: this.cancelled,
+      dimensions: this.dimensions,
+      resized: !!this.dimensions && (this.canvas.width !== this.dimensions.width || this.canvas.height !== this.dimensions.height)};
   }
 
   /** Melepas track stream; wajib dipanggil pada selesai/cancel/error. */

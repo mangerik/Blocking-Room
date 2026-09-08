@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {wallPanels} from './spatial.js';
-import {sampleScene} from './timeline-engine.js';
+import {aspectValue, aspectSize, sampleScene} from './timeline-engine.js';
 
 export class SceneRenderer {
   /**
@@ -44,6 +44,11 @@ export class SceneRenderer {
     this.observer.position.set(16, 17, 21);
     this.camera = new THREE.PerspectiveCamera(50, 16 / 9, .1, 30);
     this.camera.filmGauge = 36;
+    /** F4-06: aspect ratio milik shot. Preview kanan, viewport "Kamera / final",
+     *  picking dan ekspor semuanya memakai nilai ini, jadi crop yang dilihat
+     *  pengguna selalu sama dengan crop yang direkam. */
+    this.aspectRatio = '16:9';
+    this.aspect = 16 / 9;
     this.controls = new OrbitControls(this.observer, this.renderer.domElement);
     this.controls.target.set(0, 0, -1);
     this.controls.enableDamping = true;
@@ -425,6 +430,24 @@ export class SceneRenderer {
     this.viewMode = top ? 'top' : 'perspective';
   }
 
+  /**
+   * Mengganti aspect ratio kamera final (F4-06).
+   * Mengubah ukuran buffer POV berarti ekspor merekam crop yang sama dengan preview.
+   * @param {string} ratio salah satu ASPECT_RATIOS schema
+   */
+  setAspect(ratio) {
+    const value = aspectValue(ratio);
+    if (ratio === this.aspectRatio && value === this.aspect) return this.aspect;
+    this.aspectRatio = ratio;
+    this.aspect = value;
+    this.camera.aspect = value;
+    this.camera.updateProjectionMatrix();
+    const {width, height} = aspectSize(ratio);
+    this.povRenderer.setSize(width, height, false);
+    this.lastPovAt = -Infinity;
+    return value;
+  }
+
   // ---------- rendering ----------
   /** Render sudut pandang kamera final; dipakai preview kanan dan ekspor video. */
   renderPOV(view, targetRenderer = this.povRenderer) {
@@ -479,7 +502,7 @@ export class SceneRenderer {
     this.controls.update();
     if (this.viewMode === 'camera') {
       const w = this.viewport.clientWidth, h = this.viewport.clientHeight;
-      const fw = Math.min(w, h * 16 / 9), fh = fw * 9 / 16;
+      const fw = Math.min(w, h * this.aspect), fh = fw / this.aspect;
       this.renderer.setScissorTest(false);
       this.renderer.setViewport(0, 0, w, h);
       this.renderer.setClearColor('#30362f');
@@ -559,7 +582,7 @@ export class SceneRenderer {
   frameRect() {
     const rect = this.renderer.domElement.getBoundingClientRect();
     if (this.viewMode !== 'camera') return rect;
-    const width = Math.min(rect.width, rect.height * 16 / 9), height = width * 9 / 16;
+    const width = Math.min(rect.width, rect.height * this.aspect), height = width / this.aspect;
     return {left: rect.left + (rect.width - width) / 2, top: rect.top + (rect.height - height) / 2, width, height};
   }
   ray(event) {

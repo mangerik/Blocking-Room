@@ -160,3 +160,72 @@ button[hidden]{display:none!important}
   .studio{grid-template-columns:158px minmax(0,1fr)}
   .object-row .object{min-width:44px}
 }
+
+/* ---------- Fase 4: shot list, timeline frame, seleksi keyframe, safe area ----------
+   Ditulis sebagai blok tambahan di akhir berkas supaya aturan lama tetap terbaca
+   apa adanya; yang perlu diganti diganti di sini, bukan diedit di tengah baris. */
+.studio{grid-template-rows:minmax(340px,1fr) 258px}
+.timeline{display:flex;flex-direction:column}
+.timeline-head{height:auto;min-height:48px;flex-wrap:wrap;row-gap:6px;padding:7px 15px}
+.timeline-body{height:auto;flex:1;min-height:92px}
+.timeline-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10px;color:var(--muted)}
+.timeline-tools button{padding:5px 8px;font-size:10px}
+.frame-field{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);margin:0}
+.frame-field input{width:62px;padding:5px 6px}
+.smpte{font-variant-numeric:tabular-nums;font-size:10px;color:var(--muted);letter-spacing:.4px}
+.zoom-label{font-variant-numeric:tabular-nums;font-size:10px;color:var(--muted);min-width:26px;text-align:center}
+.key-count{font-size:10px;color:var(--muted)}
+.duration select{width:auto;padding:5px 6px;font-size:10px;margin-left:4px}
+.mode-cue{font-size:9px;font-weight:700;letter-spacing:1.1px;border-radius:4px;padding:5px 8px;margin-left:8px;
+  background:#e7e9df;color:#30362f;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mode-cue[data-mode="play"]{background:#dfe8dc;color:#2f4a35}
+.mode-cue[data-mode="record"],.mode-cue[data-mode="export"]{background:#f6e2d8;color:#8f4527}
+/* Ruler frame: tick diletakkan absolut sesuai jendela zoom/pan. */
+.ruler{display:block;position:relative;overflow:hidden}
+.ruler .tick{position:absolute;top:8px;transform:translateX(-50%);white-space:nowrap;font-variant-numeric:tabular-nums}
+.ruler .tick:before{content:'';position:absolute;left:50%;top:-8px;height:6px;width:1px;background:#c9cec0}
+.key.selected{background:#a75333;border-color:#7d3a20;width:9px;height:9px;top:5px;z-index:3}
+.track-lane{cursor:pointer}
+/* Daftar shot (F4-01) */
+.shot-list{padding:0 9px}
+.shot-row{display:flex;align-items:center;border:1px solid transparent;border-radius:5px;margin:2px 0;min-width:0}
+.shot-row.selected{background:#eeeee5;border-color:#d9dace}
+.shot-row.compared{border-color:#c9b49a;background:#f7f0e6}
+.shot-open{flex:1;min-width:0;display:flex;align-items:center;gap:9px;text-align:left;border:0;background:transparent;padding:9px 7px}
+.shot-open .scene-text{min-width:0}
+.shot-open strong{font-size:11px;font-weight:550;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shot-open small{font-size:9px;color:var(--muted);display:block;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shot-no{font-size:9px;font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:5px 5px;background:#faf9f5}
+.shot-ab{font-size:10px;font-weight:700;color:var(--muted);padding:7px 8px}
+.shot-row.compared .shot-ab{color:#8f4527}
+.shot-note{margin:2px 17px 10px;width:calc(100% - 34px);border:1px solid #dadcd1;border-radius:4px;padding:7px 8px;background:#fdfcf8;resize:vertical}
+.shot-compare{margin:0 12px 12px;border:1px solid var(--line);border-radius:6px;background:#faf9f5;padding:10px}
+.shot-compare[hidden]{display:none}
+.compare-head{font-size:10px;margin-bottom:7px;color:#30362f}
+.compare-table{width:100%;border-collapse:collapse;font-size:9px;color:#30362f}
+.compare-table th{text-align:left;color:var(--muted);font-weight:600;padding:3px 2px;border-bottom:1px solid var(--line)}
+.compare-table td{padding:3px 2px;border-bottom:1px solid #ebebe2;vertical-align:top}
+.compare-table tr.differs td{background:#f6ece1;font-weight:600}
+.compare-actions{display:flex;gap:6px;margin-top:8px}
+/* Safe area kamera (F4-06) */
+.safe-area{position:absolute;inset:0;pointer-events:none}
+.safe-area[hidden]{display:none}
+.safe-area i{position:absolute;display:block;border:1px dashed #ffffff5c}
+.safe-area .safe-action{inset:5%}
+.safe-area .safe-title{inset:10%}
+.camera-meta{align-items:center;gap:8px}
+.camera-meta button{padding:5px 7px;font-size:9px}
+.lens-presets{display:flex;gap:5px;margin:0 0 12px}
+.lens-presets button{flex:1;font-size:10px;padding:7px 3px}
+@media(min-width:1600px){.studio{grid-template-rows:minmax(380px,1fr) 278px}.timeline-body{min-height:112px}}
+@media(max-width:850px){.studio{grid-template-rows:480px 258px auto}}
+@media(max-width:540px){
+  .studio{grid-template-rows:400px 300px auto}
+  .timeline-tools button,.timeline-tools .frame-field input,.duration select,
+  #shot-list button,#shot-actions button,#add-shot,#shot-notes,#toggle-safe,
+  .shot-compare button,.lens-presets button{min-height:44px;min-width:44px}
+  .timeline-tools{gap:4px}
+  .timeline-tools button{padding:10px 8px}
+  .frame-field input{width:64px}
+  .shot-open{min-width:0}
+}

@@ -104,10 +104,56 @@ export function writeSceneView(doc, sceneId, shotId, view) {
     shot.cameraId = null;
   }
   shot.tracks = tracks;
+  // F4-02: identitas aktor milik SCENE, track milik SHOT. Menambah atau menghapus
+  // aktor pada shot aktif karena itu harus ikut menyesuaikan shot lain, kalau tidak
+  // dokumen langsung tidak valid (validator menuntut tepat satu track pose per aktor
+  // di SETIAP shot dan menolak track yang menunjuk aktor yang sudah tidak ada).
+  syncShotTracks(scene, {seedFrom: shot});
   // `updatedAt` sengaja tidak disentuh di sini: stempel waktu diberikan saat dokumen
   // benar-benar disimpan (src/storage.js) supaya snapshot history tidak berubah hanya
   // karena waktu, dan operasi tanpa perubahan tetap tidak membuat langkah undo baru.
   return doc;
+}
+
+const ACTOR_SEED = {x: 0, z: 0, r: 0};
+const CAMERA_SEED = {x: 0, y: 2, z: 6, tx: 0, ty: 1.2, tz: 0};
+
+/**
+ * Menyelaraskan track SELURUH shot dalam satu scene dengan daftar aktor scene (F4-02).
+ *
+ * - Aktor baru mendapat track default (satu keyframe pada t=0) di setiap shot; pose
+ *   awalnya disalin dari `seedFrom` bila tersedia supaya aktor tidak tiba-tiba
+ *   muncul di titik nol pada alternatif shot lain.
+ * - Aktor yang dihapus kehilangan track-nya di setiap shot.
+ * - Kamera shot lain yang mengikuti aktor terhapus kembali ke titik pandang manual
+ *   (`targetId: ''`). Menolak penghapusan saat kamera terkunci adalah keputusan UI
+ *   (main.js `deleteItem`), bukan tugas fungsi ini.
+ *
+ * Urutan track dijaga sama dengan `writeSceneView` (aktor sesuai urutan scene, lalu
+ * kamera) sehingga menyimpan dua kali menghasilkan dokumen yang identik byte-per-byte.
+ */
+export function syncShotTracks(scene, {seedFrom = null} = {}) {
+  for (const shot of scene.shots) {
+    const byId = new Map(shot.tracks.map(track => [track.objectId, track]));
+    const tracks = [];
+    for (const actor of scene.actors) {
+      const existing = byId.get(actor.id);
+      if (existing) {tracks.push(existing); continue;}
+      const seed = seedFrom?.tracks.find(t => t.objectId === actor.id)?.keys?.[0];
+      const key = seed ? {...clone(seed), t: 0} : {...ACTOR_SEED, t: 0};
+      tracks.push({objectId: actor.id, property: 'pose', interpolation: 'linear', keys: [key]});
+    }
+    if (shot.camera) {
+      if (shot.camera.targetId && !scene.actors.some(a => a.id === shot.camera.targetId)) shot.camera.targetId = '';
+      const existing = byId.get(shot.camera.id);
+      tracks.push(existing ?? {
+        objectId: shot.camera.id, property: 'pose', interpolation: 'linear',
+        keys: [{...CAMERA_SEED, t: 0}],
+      });
+    }
+    shot.tracks = tracks;
+  }
+  return scene;
 }
 
 /**

@@ -81,6 +81,17 @@ The visual language deliberately stays simple. Geometric actors and lightweight 
 - Navigate with a project / scene / shot breadcrumb and return to the dashboard, which flushes pending saves and releases the writer lock first.
 - Edit the director's note, scene name, and camera name as stored data instead of fixed demo text.
 
+### Shots and timeline
+
+- Build a shot list per scene with number, name, active camera and lens, duration, fps, aspect ratio, keyframe count, and notes; create, duplicate, reorder, rename, switch, and delete shots.
+- Compare two alternatives side by side: pick a B shot and read a difference table (lens, aim, duration, fps, aspect ratio, and keyframe counts), then swap to it in one click.
+- Cameras and motion tracks belong to the shot; actor and set identity belong to the scene, so changing shot B never touches shot A. Deleting an actor followed by a *locked* camera in any shot is refused with an explanation; an unlocked camera falls back to manual aim and says which shots changed.
+- Edit on a frame ruler with frame snapping (toggleable), zoom and pan, an exact frame input, `MM:SS:FF` timecode, single-frame stepping, and clamping at the start and end of the shot. Changing fps never moves a keyframe: time is stored in seconds and frames are a display unit.
+- Drag, multi-select, copy, paste, and delete keyframes. Every bulk operation is a single undo step, locked or hidden items are skipped with a named list, and any keyframe overwritten by a time collision is reported.
+- Choose wide / normal / tele lens presets, per-shot 16:9, 9:16, 2.39:1, 4:3, or 1:1 framing with a safe-area overlay, and keyframe focal length. Preview and export share the same crop.
+- Turn on an optional 0.5 m snap grid when arranging the set; it is off by default and does not apply while recording.
+- Read the current mode at a glance: an Edit / Play / Record cue with the active frame number.
+
 ### Editing safety
 
 - Undo and redo up to 100 document changes during the current browser session.
@@ -348,7 +359,9 @@ Key design rules:
 │   ├── migrate.js             # Version 1 → version 2 migration
 │   ├── package.js             # `.blockingroom.json` package build/read with checksums
 │   ├── scene-renderer.js      # Three.js boundary, context-loss handling, dispose
-│   ├── timeline-engine.js     # Sampling, time formatting, keyframe helpers
+│   ├── timeline-engine.js     # Sampling, time formatting, keyframe helpers, aspect ratios
+│   ├── timeline-view.js       # Frame ruler window, snapping, bulk keyframe operations
+│   ├── shots.js               # Shot list operations and A/B comparison
 │   ├── export-service.js      # MediaRecorder video export
 │   ├── storage.js             # The only module touching localStorage
 │   ├── capabilities.js        # Central browser capability detection (no UA sniffing)
@@ -421,7 +434,7 @@ Terminal 2:
 npm run test:browser
 ```
 
-Browser tests write screenshots, JSON fixtures, and test videos to `artifacts/`, which is ignored by Git. They cover the main Three.js workflow, keyframes, camera preview, lock/hide safety, direct viewport manipulation, undo/redo grouping, project round-trips, procedural walking, real doorway geometry, deletion, empty-camera recovery, responsive overflow, video download, version 1 migration, atomic autosave and recovery snapshots, multi-tab isolation, the dashboard journey (create, add scene, switch project, reload, duplicate, trash restore, package round-trip, legacy import, 44 px touch targets, 390 px layout), WebGL context loss and recovery, the no-WebGL fallback, local metrics, the dashboard feature flag, version 1 export for rollback, the accessibility audit, and a release-gate bug hunt for lock bypass and data loss.
+Browser tests write screenshots, JSON fixtures, and test videos to `artifacts/`, which is ignored by Git. They cover the main Three.js workflow, keyframes, camera preview, lock/hide safety, direct viewport manipulation, undo/redo grouping, project round-trips, procedural walking, real doorway geometry, deletion, empty-camera recovery, responsive overflow, video download, version 1 migration, atomic autosave and recovery snapshots, multi-tab isolation, the dashboard journey (create, add scene, switch project, reload, duplicate, trash restore, package round-trip, legacy import, 44 px touch targets, 390 px layout), WebGL context loss and recovery, the no-WebGL fallback, local metrics, the dashboard feature flag, version 1 export for rollback, the accessibility audit, the shot and timeline suite (mode cue, isolated shot alternatives, bulk keyframe editing with one undo, frame snapping and clamping, snap grid, deterministic walking, doors, deleted camera targets, shots without a camera), and a release-gate bug hunt for lock bypass and data loss.
 
 ### Performance harness
 
@@ -440,8 +453,9 @@ Tested locally during prototype development with Node.js 22 and stable Chrome on
 - Actors are geometric mannequins. The procedural walk is a staging cue, not a rigged animation with foot IK.
 - Rooms are rectangular and expose only left/back walls. Doors are always open and limited to those walls.
 - Wall checks warn about straight keyframe segments but do not enforce physical collision or automatically reroute actors.
-- Set decorations are still demonstration geometry rather than first-class editable props.
-- Timeline editing has no keyframe drag, multi-select, copy/paste, per-property tracks, easing editor, or frame snapping.
+- Set decorations are still demonstration geometry rather than first-class editable props, and wall segments are not yet independent objects (schema version 3 work; see `docs/DATA-MODEL.md` section 8).
+- Timeline tracks are still combined pose tracks: position and orientation cannot be keyed separately, and interpolation is linear only — no hold or ease (also schema version 3 work).
+- Keyframe selection has no marquee; use click and Shift/Ctrl-click.
 - Rotation uses the shortest angular interpolation; intentional turns greater than 360 degrees are not represented.
 - Shortening duration trims later keyframes. Locked animated items must be unlocked before such trimming.
 - Video export is real-time and browser-dependent, with no audio or universal MP4 guarantee.
@@ -456,12 +470,12 @@ The detailed roadmap lives in [plan.md](plan.md), with product rationale and acc
 |---|---|---|
 | R0 | Safe editor: history, lock, visibility, rotation, final-view editing | Implemented baseline |
 | R0.1 | Procedural walking, full item deletion, door openings, wall warnings | Implemented baseline |
-| R1 | Local project dashboard, multiple scenes, IndexedDB, autosave recovery, trash, import/export packages | Planned |
-| R2 | Shot list, isolated cameras/tracks, advanced timeline, props, cinematic formats, deterministic export | Planned |
+| R1 | Local project dashboard, multiple scenes, IndexedDB, autosave recovery, trash, import/export packages | Implemented; release gate passed |
+| R2 | Shot list, isolated cameras/tracks, advanced timeline, props, cinematic formats, deterministic export | Shot list, isolated cameras/tracks, advanced timeline, and cinematic formats implemented; per-property tracks, props, and deterministic export outstanding |
 | R3 | Optional cloud sync, revision history, roles, immutable review links, timestamp comments | Conditional on validation |
 | Exploration | GLB/rigs, audio cues, floor-plan underlays, continuity tools, AI-assisted blocking | Research backlog |
 
-The immediate next work is to freeze migration fixtures and establish the Project → Scene → Shot data contract before replacing storage or building the dashboard.
+The immediate next work is deterministic export (phase 5), followed by the single schema version 3 migration that carries separate position/rotation tracks, hold/ease interpolation, and prop entities together. See `plan.md` and `docs/DATA-MODEL.md` section 8.
 
 ## Contributing
 

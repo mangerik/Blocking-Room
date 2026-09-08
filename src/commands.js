@@ -132,6 +132,21 @@ export class EditorSession {
     return this.store.view;
   }
 
+  /**
+   * Menyegarkan entri history teratas dengan keadaan sekarang TANPA menambah langkah.
+   *
+   * Dipakai setelah navigasi (pindah scene/shot). Scene dan shot aktif hidup di dalam
+   * dokumen, jadi tanpa ini undo berikutnya akan melompat kembali ke scene/shot lama —
+   * artinya navigasi ikut dibatalkan, padahal navigasi bukan perubahan kreatif.
+   * Jumlah langkah undo tidak berubah, hanya isinya yang disegarkan.
+   */
+  rebase() {
+    if (this.readOnly) return null;
+    const snapshot = this.validatedSnapshot();
+    this.history.entries[this.history.index] = JSON.stringify(snapshot);
+    return snapshot;
+  }
+
   /** Undo/redo memulihkan dokumen sekaligus scene/shot aktif di dalamnya. */
   undo() {this.assertWritable(); return this.restore('undo');}
   redo() {this.assertWritable(); return this.restore('redo');}

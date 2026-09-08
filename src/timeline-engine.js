@@ -31,7 +31,26 @@ export function sampleCamera(view, time) {
     const actorPose = sample(follow.keys, time);
     target = {x: actorPose.x, y: follow.height * 0.72, z: actorPose.z};
   }
-  return {pose, target, focal: view.camera.focal, following: follow?.id ?? null};
+  // F4-06: focal length boleh di-key pada track kamera. Bila keyframe membawa
+  // `focal`, nilai hasil interpolasi itulah yang dipakai preview DAN ekspor —
+  // keduanya memanggil `sampleScene` yang sama, jadi tidak mungkin berbeda.
+  const focal = Number.isFinite(pose.focal) ? pose.focal : view.camera.focal;
+  return {pose, target, focal, following: follow?.id ?? null};
+}
+
+/** Rasio lebar/tinggi untuk setiap aspect ratio shot (F4-06). */
+export const ASPECT_VALUES = {'16:9': 16 / 9, '9:16': 9 / 16, '2.39:1': 2.39, '4:3': 4 / 3, '1:1': 1};
+export const aspectValue = ratio => ASPECT_VALUES[ratio] ?? ASPECT_VALUES['16:9'];
+
+/**
+ * Ukuran buffer render untuk sebuah aspect ratio, dibulatkan ke kelipatan 2
+ * (syarat encoder video; lihat docs/SPIKE-ENCODER.md §11).
+ */
+export function aspectSize(ratio, {maxWidth = 1280, maxHeight = 1280, baseHeight = 720} = {}) {
+  const value = aspectValue(ratio);
+  const even = n => Math.max(2, Math.round(n / 2) * 2);
+  const height = value >= 1 ? Math.min(baseHeight, maxWidth / value) : Math.min(maxHeight, baseHeight / value);
+  return {width: even(height * value), height: even(height)};
 }
 
 /**

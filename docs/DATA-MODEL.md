@@ -1,6 +1,12 @@
 # Kontrak data — Blocking Room schema v2
 
-Status: berlaku sejak Fase 1 (F1-01, F1-02, F1-08). Sumber requirement: [PRD §11](PRD.md). Rencana: [plan.md](../plan.md).
+Status: berlaku sejak Fase 1 (F1-01, F1-02, F1-08); diperbarui pada Fase 4 (shot list, timeline frame, kamera per shot). Sumber requirement: [PRD §11](PRD.md). Rencana: [plan.md](../plan.md).
+
+**Fase 4 tidak menaikkan `schemaVersion`.** Semua perubahan Fase 4 memakai field yang sudah
+ada (`shot.fps`, `shot.aspectRatio`, `shot.notes`, banyak `shot` per scene) ditambah satu
+field keyframe kamera yang opsional dan kompatibel mundur (`focal`). Dokumen v2 lama dibuka
+apa adanya dan dokumen hasil Fase 4 tetap dapat dibuka build sebelumnya. Yang **memerlukan**
+`schemaVersion: 3` adalah sisa Fase 4 yang belum dikerjakan — lihat §8.
 
 Dokumen ini adalah kontrak yang dipakai `src/schema.js` (validator), `src/migrate.js` (migrasi v1 → v2), `src/document.js` (selector scene/shot) dan `src/commands.js` (command/history). Bila dokumen ini dan kode berbeda, perbaiki keduanya dalam satu perubahan.
 
@@ -79,8 +85,8 @@ Dokumen ini adalah kontrak yang dipakai `src/schema.js` (validator), `src/migrat
 | `sceneId` | ID scene | **Harus** sama dengan scene pemiliknya; berbeda → ditolak. |
 | `name`, `order`, `notes` | string / integer / string | Metadata shot. |
 | `duration` | 1–120 detik | **Durasi milik shot**, bukan proyek. |
-| `fps` | 1–120 | Default hasil migrasi: **24**. Belum dipakai untuk sampling pada R1 (lihat §5). |
-| `aspectRatio` | `16:9`, `9:16`, `2.39:1`, `4:3`, `1:1` | Default `16:9`. |
+| `fps` | 1–120 | Default hasil migrasi: **24**. Sejak Fase 4 dipakai lapisan tampilan/timeline (ruler frame, snapping, timecode, input frame) — **bukan** untuk penyimpanan waktu keyframe (lihat §5). Mengubahnya tidak menggeser satu pun keyframe. |
+| `aspectRatio` | `16:9`, `9:16`, `2.39:1`, `4:3`, `1:1` | Default `16:9`. Sejak Fase 4 nilai ini mengatur aspect kamera final, ukuran buffer preview (`SceneRenderer.setAspect`) **dan** canvas yang direkam ekspor, sehingga crop preview = crop hasil rekaman. |
 | `cameraId` | ID kamera \| null | Harus konsisten dengan `camera`. |
 | `camera` | Camera \| null | **Kamera opsional**: `null` adalah keadaan sah (proyek tanpa kamera). Ekspor menolak, editor tetap berjalan. |
 | `tracks` | Track[] | **Gerakan milik shot.** |
@@ -98,8 +104,20 @@ Dokumen ini adalah kontrak yang dipakai `src/schema.js` (validator), `src/migrat
 `{ objectId, property: 'pose', interpolation: 'linear', keys: Keyframe[] }`
 
 - Satu track pose per objek per shot; setiap aktor dan kamera pada shot **wajib** punya track (minimal satu keyframe).
+- **Konsekuensi kepemilikan (F4-02).** Aktor milik scene, track milik shot. Karena itu
+  menambah atau menghapus aktor harus menyentuh SETIAP shot dalam scene, bukan hanya shot
+  aktif. `document.js#syncShotTracks` melakukannya setiap kali scene view ditulis kembali:
+  aktor baru mendapat track default satu keyframe pada `t=0` (pose awalnya disalin dari
+  shot aktif), aktor terhapus kehilangan track-nya di semua shot, dan kamera shot lain yang
+  mengikuti aktor terhapus kembali ke titik pandang manual (`targetId: ''`). Fungsi ini
+  idempoten: menjalankannya dua kali menghasilkan dokumen yang identik.
 - `objectId` harus aktor di scene yang sama atau kamera shot tersebut. Referensi ke objek scene lain ditolak.
-- Keyframe aktor: `{ t, x, z, r }`. Keyframe kamera: `{ t, x, y, z, tx, ty, tz }`.
+- Keyframe aktor: `{ t, x, z, r }`. Keyframe kamera: `{ t, x, y, z, tx, ty, tz }` dan **opsional** `focal` (F4-06).
+  `focal` bersifat aditif dan kompatibel mundur: dokumen lama tanpa field ini tetap valid,
+  dan `sampleCamera` memakai `camera.focal` bila keyframe tidak membawanya. Begitu satu
+  keyframe kamera memiliki `focal`, editor mengisinya pada SELURUH keyframe kamera track
+  tersebut — `sample()` menginterpolasi seluruh field, jadi campuran ada/tidak ada akan
+  menghasilkan `NaN`. Rentangnya sama dengan `camera.focal` (14–120 mm).
 - `t` dalam detik, `0 ≤ t ≤ shot.duration`, unik dalam track, selalu terurut naik. Maksimal 2400 keyframe per track.
 - `property` dan `interpolation` sengaja eksplisit agar R2 (F4-05) dapat menambah track posisi/orientasi terpisah dan `hold`/`ease` tanpa mengubah bentuk dokumen.
 
@@ -202,7 +220,8 @@ ini tidak menambah dependency.
 7. Aktor atau kamera tanpa track pose, atau track dengan keyframe kosong/di luar durasi/waktu ganda.
 8. `locked` atau `visible` bukan boolean.
 9. Pintu di luar dinding, lebih dari dua per ruangan, atau lebih dari satu per dinding.
-10. Batas ukuran terlampaui (lihat `LIMITS`): 200 scene, 100 shot/scene, 50 aktor/scene, 30 set/scene, 2400 keyframe/track, nama ≤ 100 karakter, catatan ≤ 2000 karakter.
+10. `key.focal` ada tetapi di luar 14–120 mm (F4-06; field opsional, lihat §2 Track).
+11. Batas ukuran terlampaui (lihat `LIMITS`): 200 scene, 100 shot/scene, 50 aktor/scene, 30 set/scene, 2400 keyframe/track, nama ≤ 100 karakter, catatan ≤ 2000 karakter.
 
 **`LIMITS.documentBytes` = 5 000 000 B (keputusan F6-03).** Sebelumnya 3 000 000 B, sementara PRD §9 menargetkan "buka proyek p95 ≤2 detik untuk proyek metadata **≤5 MB** tanpa aset" — dua angka yang saling bertentangan. Angka PRD yang dipakai, dan `src/schema.js` diselaraskan.
 
@@ -233,10 +252,17 @@ Alur satu perubahan kreatif: **mutasi scene view → `flush` ke dokumen → vali
 | Aturan | Nilai | Alasan |
 |---|---|---|
 | Satuan penyimpanan | detik (`t`) | Sama dengan JSON v1; migrasi tidak perlu mengubah satu angka pun, sehingga pose sebelum/sesudah migrasi identik bit-per-bit. |
-| Grid input editor | 0,1 detik (`putKey` membulatkan `Math.round(t*10)/10`) | Cukup halus untuk blocking, cukup kasar agar drag tidak menghasilkan ribuan keyframe. |
-| Toleransi pencocokan | 0,05 detik (`TIME_TOLERANCE`, `keyIndexAt`) | Dua keyframe dianggap sama bila selisih < 0,05 detik; nilai ini setengah grid sehingga tidak pernah menggabungkan dua slot 0,1 detik yang berbeda. |
-| `fps` shot | 24 (default migrasi) | Metadata; **belum** dipakai untuk sampling pada R1. Playback R1 memakai waktu wall-clock. |
+| Grid input editor | **grid frame shot** `t = round(t × fps) / fps` sejak Fase 4 (`main.js#setKey` + `timeline-view.js#snapTime`); dapat dimatikan lewat tombol **Snap** | Snapping ke frame adalah syarat TL-01. Grid lama 0,1 detik tidak dapat hidup berdampingan dengannya: pada 24 fps jarak antarframe 0,0417 detik, lebih kecil daripada toleransi lama 0,05 detik, sehingga dua frame bertetangga akan dianggap keyframe yang sama. `model.js#putKey` (grid 0,1 detik) **tidak diubah** karena ia bagian dari model v1 dan masih diuji apa adanya. |
+| Toleransi pencocokan | `keyTolerance(fps) = min(0,05; 0,5 / fps)` detik (`timeline-view.js`) | Setengah frame, sehingga tidak pernah menggabungkan dua frame bertetangga; pada fps sangat rendah tetap jatuh ke nilai lama 0,05 detik. `TIME_TOLERANCE`/`KEY_TOLERANCE` lama tetap ada untuk jalur v1 dan `trimTrackToDuration`. |
+| `fps` shot | 24 (default migrasi) | Satuan tampilan sejak Fase 4 (ruler, snapping, timecode, input frame). Playback tetap memakai waktu wall-clock; penyimpanan tetap detik. |
 | Rentang valid | `0 ≤ t ≤ shot.duration` | Keyframe di luar durasi ditolak validator. |
+
+**Perilaku playhead pada Fase 4 (F4-03).** Playhead menerima input dalam nomor frame
+(`#frame-input`) dan menampilkan timecode `MM:SS:FF`. Nilai di luar rentang **dijepit**,
+bukan ditolak diam-diam: frame < 0 menjadi 0, frame > `round(duration × fps)` menjadi
+frame terakhir, dan pengguna diberi tahu. Zoom/pan timeline hanyalah jendela tampilan
+(`timeline-view.js#TimelineWindow`) — keduanya tidak pernah mengubah waktu playhead maupun
+dokumen, dan karena itu tidak masuk history.
 
 **Kebijakan konversi ke frame pada R2 (F4-03/F4-05, EX-02):**
 
@@ -246,7 +272,7 @@ Alur satu perubahan kreatif: **mutasi scene view → `flush` ke dokumen → vali
    - membandingkan pose hasil sampling sebelum dan sesudah pada minimal tiga titik (awal/tengah/akhir) untuk setiap track;
    - **menolak** migrasi bila selisih posisi > 1 mm atau selisih sudut > 0,05° pada titik uji; grid 0,1 detik pada 24/30 fps tidak jatuh tepat pada batas frame, jadi pembulatan diam-diam adalah risiko nyata;
    - menyimpan sisa pembulatan (`t − frame/fps`) atau menaikkan `fps` dokumen, bukan membuang selisihnya.
-3. Mengubah `fps` shot **tidak boleh** menggeser waktu keyframe yang sudah ada; hanya penggarisan timeline yang berubah.
+3. Mengubah `fps` shot **tidak boleh** menggeser waktu keyframe yang sudah ada; hanya penggarisan timeline yang berubah. *Diimplementasikan dan diuji pada Fase 4* (`shots.js#setShotSettings`, unit “mengubah fps shot tidak menggeser satu pun waktu keyframe”, dan `tests/shot-timeline-browser.mjs`).
 4. Ekspor deterministik (EX-02) mengambil sampel pada `t = frame / fps` untuk `frame = 0…duration×fps − 1`, memakai `sampleScene` yang sama dengan preview.
 
 ## 6. Versi schema dan kompatibilitas
@@ -263,3 +289,53 @@ Alur satu perubahan kreatif: **mutasi scene view → `flush` ke dokumen → vali
 ## 7. Penyimpanan Fase 1
 
 Sementara masih `localStorage` dengan kunci `blocking-room` (isinya kini dokumen v2). `blocking-room.backup` menyimpan salinan mentah terakhir yang gagal dibaca atau yang dimigrasikan. Repository IndexedDB, autosave transaksional, revision recovery dan isolasi antartab adalah Fase 2 (F2-01…F2-09) dan tidak boleh dianggap sudah ada.
+
+## 8. Yang belum masuk kontrak ini — rencana `schemaVersion: 3`
+
+Tiga task Fase 4 **belum dikerjakan** dan sengaja tidak dicentang di `plan.md`
+(F4-05 TL-02, F4-07 dan F4-08 SC-01). Ketiganya menuntut bentuk dokumen baru, dan
+menaikkan `schemaVersion` adalah pintu satu arah: build lama akan menolak dokumen v3
+dengan `SchemaTooNewError` (perilaku yang memang dirancang, lihat §6 dan
+`docs/ROLLOUT.md`). Karena itu ketiganya sebaiknya mendarat **dalam satu migrasi
+v2 → v3**, bukan tiga kali berturut-turut.
+
+### Perubahan bentuk yang dibutuhkan
+
+| Task | Perubahan dokumen |
+|---|---|
+| F4-05 (TL-02) | `track.property` menerima `'position'` dan `'rotation'` selain `'pose'`; `track.interpolation` menerima `'hold'` dan `'ease'` selain `'linear'`. Migrasi memecah setiap track `pose` aktor menjadi track `position` (`{t,x,z}`) dan `rotation` (`{t,r}`) dengan waktu yang persis sama. Track kamera tetap `pose`. |
+| F4-07 (SC-01) | `scene.setObjects` menerima `type: 'prop'` — `{id, type:'prop', shape:'box'\|'table'\|'chair'\|'decor', name, color, x, z, y, r, w, d, h, locked, visible, assetRef}`. Dekorasi contoh yang sekarang digambar berdasarkan **indeks ruangan** di `scene-renderer.js#build` (blok `if (i === 0/1/2)`) dikonversi menjadi prop ber-ID oleh migrasi, lalu blok indeks itu dihapus. `LIMITS.setObjects` perlu dinaikkan (30 → sekitar 80) karena prop berbagi array yang sama. |
+| F4-08 (SC-01) | Segmen dinding sebagai prop `shape: 'wall'` (`{x, z, r, w, h}`), terpisah dari `room.doors` yang tetap apa adanya. Peringatan tembus dinding tetap peringatan (`spatial.js#wallCrossings`), bukan collision. |
+
+### Syarat migrasi (wajib, jangan dilonggarkan)
+
+1. **Copy-first.** `migrateV2ToV3` meng-clone input, membangun hasil, memvalidasinya, dan
+   melempar bila gagal — persis pola `migrateV1ToV2`. `openProjectData` merantai
+   v1 → v2 → v3 sehingga impor JSON v1 tetap didukung tanpa batas waktu.
+2. **Kesetaraan gerak dibuktikan dengan data, bukan screenshot.** Bandingkan
+   `baselineOf()` (`tests/fixtures/baseline/*.json`, golden Fase 0) sebelum dan sesudah
+   pemecahan track pada interpolasi `linear`; selisih posisi > 1 mm atau sudut > 0,05°
+   berarti migrasi ditolak.
+3. **Jalur baca dokumen tersimpan harus ikut dimigrasikan.** Ini bagian yang paling mudah
+   terlewat: dokumen v2 sudah ada di IndexedDB pengguna, sedangkan
+   `src/bootstrap.js` menyerahkan hasil `repository.getDocument()` langsung ke
+   `DocumentStore` tanpa melewati `openProjectData`. Titik yang perlu disesuaikan:
+   `bootstrap()` (dokumen aktif dan `adoptPending`), `#open-last-saved` di `src/main.js`,
+   serta duplicate/ekspor paket di `src/dashboard.js`. Dokumen hasil upgrade harus
+   disimpan ulang supaya migrasi tidak dijalankan berulang setiap kali membuka proyek.
+4. **Asersi versi pada uji lama ikut diperbarui dan dicatat**, bukan dilonggarkan:
+   `tests/migration-browser.mjs`, `tests/dashboard-browser.mjs`, `tests/capability-browser.mjs`,
+   `tests/dashboard.test.js`, `tests/document.test.js`, dan fixture beban
+   `tests/fixtures/load/*.json` (berisi `"schemaVersion": 2`, jadi harus dibuka lewat
+   `openProjectData`, bukan langsung `validateDocument`).
+
+### D-05 — hide global tetap dipertahankan (F4-09)
+
+Keputusan Fase 4: **tidak** memisahkan `hiddenInEditor` dan `includeInRender`.
+`visible: false` tetap berarti objek hilang dari scene, label, jalur, picking **dan**
+video, persis seperti R0/R1 (PRD ED-03 dan “Semantik yang harus konsisten”). Alasannya:
+pemisahan itu hanya bermakna bila ada kebutuhan tervalidasi untuk menyembunyikan sesuatu
+di editor tetapi tetap merendernya, dan kebutuhan itu belum muncul; menambah dua flag
+sekarang berarti menambah migrasi, dua kontrol UI, dan satu sumber kebingungan baru tanpa
+imbalan yang terbukti. Bila kelak dipisahkan, `visible: false` lama harus dipetakan ke
+**keduanya** tersembunyi/tidak ikut render supaya hasil render proyek lama tidak berubah.
