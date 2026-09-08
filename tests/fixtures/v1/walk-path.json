@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "title": "Jalur berjalan",
+  "duration": 10,
+  "actors": [
+    {
+      "id": "walker",
+      "name": "Pejalan",
+      "color": "#c16e51",
+      "height": 1.78,
+      "locked": false,
+      "visible": true,
+      "keys": [
+        {
+          "t": 0,
+          "x": -6,
+          "z": 0,
+          "r": 90
+        },
+        {
+          "t": 4,
+          "x": -2,
+          "z": 0,
+          "r": 90
+        },
+        {
+          "t": 10,
+          "x": 6,
+          "z": 0,
+          "r": 90
+        }
+      ]
+    },
+    {
+      "id": "idle",
+      "name": "Diam",
+      "color": "#477f77",
+      "height": 1.6,
+      "locked": false,
+      "visible": true,
+      "keys": [
+        {
+          "t": 0,
+          "x": 2,
+          "z": -3,
+          "r": 350
+        },
+        {
+          "t": 10,
+          "x": 2,
+          "z": -3,
+          "r": 10
+        }
+      ]
+    }
+  ],
+  "rooms": [
+    {
+      "id": "hall",
+      "name": "Koridor",
+      "x": 0,
+      "z": 0,
+      "w": 8,
+      "d": 6,
+      "h": 3,
+      "color": "#b5c2c0",
+      "locked": true,
+      "visible": true,
+      "doors": [
+        {
+          "wall": "left",
+          "offset": 0,
+          "width": 1.6,
+          "height": 2.4
+        }
+      ]
+    }
+  ],
+  "camera": {
+    "id": "camera",
+    "name": "Kamera A",
+    "focal": 35,
+    "target": "",
+    "locked": false,
+    "visible": true,
+    "keys": [
+      {
+        "t": 0,
+        "x": -8,
+        "y": 2,
+        "z": 8,
+        "tx": -6,
+        "ty": 1.2,
+        "tz": 0
+      },
+      {
+        "t": 10,
+        "x": 8,
+        "y": 2,
+        "z": 8,
+        "tx": 6,
+        "ty": 1.2,
+        "tz": 0
+      }
+    ]
+  }
+}

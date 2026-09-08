@@ -1,0 +1,270 @@
+{
+  "title": "Galeri tanpa kamera",
+  "duration": 12,
+  "times": [
+    0,
+    6,
+    12
+  ],
+  "actors": [
+    {
+      "id": "a1",
+      "name": "Alex",
+      "height": 1.78,
+      "color": "#c16e51",
+      "locked": false,
+      "visible": true,
+      "keyCount": 3,
+      "poses": [
+        {
+          "t": 0,
+          "x": -5,
+          "z": 2,
+          "r": 0
+        },
+        {
+          "t": 6,
+          "x": -0.285714,
+          "z": 1.714286,
+          "r": 12.857143
+        },
+        {
+          "t": 12,
+          "x": 4,
+          "z": 0,
+          "r": 90
+        }
+      ],
+      "gait": [
+        {
+          "t": 0,
+          "angle": 0,
+          "speed": 0
+        },
+        {
+          "t": 6,
+          "angle": 0.422405,
+          "speed": 0.769309
+        },
+        {
+          "t": 12,
+          "angle": 0,
+          "speed": 0
+        }
+      ],
+      "crossings": []
+    },
+    {
+      "id": "a2",
+      "name": "Maya",
+      "height": 1.68,
+      "color": "#477f77",
+      "locked": false,
+      "visible": true,
+      "keyCount": 3,
+      "poses": [
+        {
+          "t": 0,
+          "x": 4,
+          "z": -1,
+          "r": 180
+        },
+        {
+          "t": 6,
+          "x": 3.142857,
+          "z": 0.714286,
+          "r": 180
+        },
+        {
+          "t": 12,
+          "x": 2,
+          "z": 1,
+          "r": 180
+        }
+      ],
+      "gait": [
+        {
+          "t": 0,
+          "angle": 0,
+          "speed": 0
+        },
+        {
+          "t": 6,
+          "angle": -0.190169,
+          "speed": 0.319438
+        },
+        {
+          "t": 12,
+          "angle": 0,
+          "speed": 0
+        }
+      ],
+      "crossings": []
+    },
+    {
+      "id": "a3",
+      "name": "Figuran 01",
+      "height": 1.75,
+      "color": "#d3ac50",
+      "locked": false,
+      "visible": true,
+      "keyCount": 1,
+      "poses": [
+        {
+          "t": 0,
+          "x": 1,
+          "z": -3,
+          "r": 0
+        },
+        {
+          "t": 0,
+          "x": 1,
+          "z": -3,
+          "r": 0
+        },
+        {
+          "t": 0,
+          "x": 1,
+          "z": -3,
+          "r": 0
+        }
+      ],
+      "gait": [
+        {
+          "t": 0,
+          "angle": 0,
+          "speed": 0
+        },
+        {
+          "t": 6,
+          "angle": 0,
+          "speed": 0
+        },
+        {
+          "t": 12,
+          "angle": 0,
+          "speed": 0
+        }
+      ],
+      "crossings": []
+    }
+  ],
+  "rooms": [
+    {
+      "id": "r1",
+      "name": "Foyer",
+      "locked": true,
+      "visible": true,
+      "box": [
+        -5,
+        0,
+        6,
+        8,
+        3
+      ],
+      "doors": [],
+      "panels": {
+        "back": [
+          [
+            0,
+            1.5,
+            6,
+            3
+          ]
+        ],
+        "left": [
+          [
+            0,
+            1.5,
+            8,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "r2",
+      "name": "Galeri utama",
+      "locked": true,
+      "visible": true,
+      "box": [
+        3,
+        0,
+        10,
+        8,
+        3.2
+      ],
+      "doors": [
+        {
+          "wall": "left",
+          "offset": 2,
+          "width": 1.6,
+          "height": 2.3
+        }
+      ],
+      "panels": {
+        "back": [
+          [
+            0,
+            1.6,
+            10,
+            3.2
+          ]
+        ],
+        "left": [
+          [
+            -1.4,
+            1.6,
+            5.2,
+            3.2
+          ],
+          [
+            3.4,
+            1.6,
+            1.2,
+            3.2
+          ],
+          [
+            2,
+            2.75,
+            1.6,
+            0.9
+          ]
+        ]
+      }
+    },
+    {
+      "id": "r3",
+      "name": "Ruang samping",
+      "locked": true,
+      "visible": true,
+      "box": [
+        4,
+        -6,
+        8,
+        4,
+        3
+      ],
+      "doors": [],
+      "panels": {
+        "back": [
+          [
+            0,
+            1.5,
+            8,
+            3
+          ]
+        ],
+        "left": [
+          [
+            0,
+            1.5,
+            4,
+            3
+          ]
+        ]
+      }
+    }
+  ],
+  "camera": null
+}

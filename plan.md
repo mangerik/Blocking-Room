@@ -56,9 +56,9 @@ Referensi: ED-01–ED-05, pembaruan implementasi PRD, M0.
 
 ### Task sebelum refactor besar
 
-- [ ] **F0-08 · P0:** Simpan fixture JSON v1: scene demo, kamera null, tanpa aktor/ruangan, objek terkunci/hidden, pintu, jalur berjalan, serta import invalid.
-- [ ] **F0-09 · P0:** Catat baseline pose pada awal/tengah/akhir shot, screenshot observer/final, dan hasil ekspor dari fixture. Jangan memakai screenshot saja untuk membuktikan kesetaraan data.
-- [ ] **F0-10 · P0:** Jalankan ulang suite pada lingkungan yang akan digunakan untuk pengembangan; catat browser, perangkat, hasil dan keterbatasannya.
+- [x] **F0-08 · P0:** Simpan fixture JSON v1: scene demo, kamera null, tanpa aktor/ruangan, objek terkunci/hidden, pintu, jalur berjalan, serta import invalid. — 6 fixture valid + 8 fixture invalid di `tests/fixtures/v1/`, dihasilkan ulang oleh `tests/fixtures/generate.mjs`.
+- [x] **F0-09 · P0:** Catat baseline pose pada awal/tengah/akhir shot, screenshot observer/final, dan hasil ekspor dari fixture. Jangan memakai screenshot saja untuk membuktikan kesetaraan data. — golden pose `tests/fixtures/baseline/*.json` (pose, gait, wall crossing, panel dinding) dibandingkan oleh `tests/fixtures.test.js`; screenshot/ekspor dari browser test di `artifacts/`.
+- [x] **F0-10 · P0:** Jalankan ulang suite pada lingkungan yang akan digunakan untuk pengembangan; catat browser, perangkat, hasil dan keterbatasannya. — macOS 26.2 (Darwin 25.2.0 arm64), Node v22.21.1, Chrome 152.0.7977.76 headless; unit + build + 3 browser test lulus. Keterbatasan: satu mesin, satu browser.
 
 **Kriteria keluar:** fixture dan hasil baseline tersedia; tidak ada kegagalan kritis pada fitur R0. Fitur yang sudah dicentang tidak dibangun ulang, tetapi diverifikasi setelah perubahan terkait.
 
@@ -68,15 +68,15 @@ Tujuan: mempersiapkan banyak proyek tanpa mengubah hasil scene lama.
 Referensi: PR-02, PR-05, PR-06; PRD §11 dan M1.
 Dependensi: F0-08–F0-10.
 
-- [ ] **F1-01 · P0:** Catat kontrak data `Project`, `Scene`, `Shot`, `Object`, `Camera`, `Track`, `Asset`, `Revision`, dan `SessionState`. Tentukan UUID, timestamp, schemaVersion dan ownership setiap field.
-- [ ] **F1-02 · P0:** Buat validator skema baru, termasuk foreign ID, batas ukuran, kamera opsional, pintu dan flag objek. Tolak referensi lintas proyek/scene yang tidak valid.
-- [ ] **F1-03 · P0:** Pisahkan document state dari state UI; buat selector scene/shot aktif. Pastikan tidak ada mutasi scene A ketika scene B aktif.
-- [ ] **F1-04 · P0:** Satukan perubahan kreatif melalui command/history. Tetapkan scope undo per proyek, pemulihan scene aktif saat undo, transaksi gestur dan pengecekan lock untuk operasi massal.
-- [ ] **F1-05 · P0:** Ekstrak batas `SceneRenderer`, `TimelineEngine`, `ExportService`, dan UI dari entry point secara bertahap. Gunakan scene sampling yang sama untuk preview dan ekspor.
-- [ ] **F1-06 · P0:** Implementasikan migrator v1 → schema baru: satu proyek, satu scene, satu shot default. Pertahankan keyframe, focal length, target, kamera null, doors, lock/hide dan semua nama pengguna.
-- [ ] **F1-07 · P0:** Migrasi harus copy-first: simpan backup sumber, validasi hasil, jangan menimpa sumber saat gagal. Tentukan penanganan schema yang lebih baru daripada aplikasi.
-- [ ] **F1-08 · P0:** Tetapkan strategi waktu keyframe agar konversi detik → frame pada R2 tidak membulatkan gerakan lama tanpa disadari. Catat kebijakan fps dan toleransi migrasi.
-- [ ] **F1-09 · P0:** Uji kesetaraan sampling sebelum/sesudah migrasi, roundtrip serialize, dan rollback migrasi gagal menggunakan fixture Fase 0.
+- [x] **F1-01 · P0:** Catat kontrak data `Project`, `Scene`, `Shot`, `Object`, `Camera`, `Track`, `Asset`, `Revision`, dan `SessionState`. Tentukan UUID, timestamp, schemaVersion dan ownership setiap field. — `docs/DATA-MODEL.md` §1–§4.
+- [x] **F1-02 · P0:** Buat validator skema baru, termasuk foreign ID, batas ukuran, kamera opsional, pintu dan flag objek. Tolak referensi lintas proyek/scene yang tidak valid. — `src/schema.js` (`validateDocument`, `LIMITS`, `SchemaTooNewError`); invariant didokumentasikan di `docs/DATA-MODEL.md` §3.
+- [x] **F1-03 · P0:** Pisahkan document state dari state UI; buat selector scene/shot aktif. Pastikan tidak ada mutasi scene A ketika scene B aktif. — `src/document.js` (`DocumentStore`, `readSceneView`/`writeSceneView`, `activeScene`/`activeShot`); UI state tetap di `src/main.js`. Bukti: `tests/document.test.js` “mengedit scene aktif tidak pernah memutasi scene lain”.
+- [x] **F1-04 · P0:** Satukan perubahan kreatif melalui command/history. Tetapkan scope undo per proyek, pemulihan scene aktif saat undo, transaksi gestur dan pengecekan lock untuk operasi massal. — `src/commands.js` (`EditorSession`, `partitionByLock`, `describeSkipped`); satu jalur `persist()` di `src/main.js`. Bukti: 6 test di `tests/document.test.js` + regresi undo browser.
+- [x] **F1-05 · P0:** Ekstrak batas `SceneRenderer`, `TimelineEngine`, `ExportService`, dan UI dari entry point secara bertahap. Gunakan scene sampling yang sama untuk preview dan ekspor. — `src/scene-renderer.js`, `src/timeline-engine.js`, `src/export-service.js`, `src/storage.js`; `main.js` tinggal UI + orkestrasi (52 KB → 39 KB) dan tidak lagi mengimpor Three.js. Preview observer, preview kamera dan ekspor sama-sama memakai `sampleScene`.
+- [x] **F1-06 · P0:** Implementasikan migrator v1 → schema baru: satu proyek, satu scene, satu shot default. Pertahankan keyframe, focal length, target, kamera null, doors, lock/hide dan semua nama pengguna. — `src/migrate.js` (`migrateV1ToV2`, `openProjectData`). Bukti: `tests/migrate.test.js` + `tests/migration-browser.mjs`.
+- [x] **F1-07 · P0:** Migrasi harus copy-first: simpan backup sumber, validasi hasil, jangan menimpa sumber saat gagal. Tentukan penanganan schema yang lebih baru daripada aplikasi. — clone sebelum migrasi + validasi hasil di `src/migrate.js`; cadangan mentah ke kunci `blocking-room.backup` di `src/storage.js`; `SchemaTooNewError` menonaktifkan penyimpanan otomatis. Kebijakan di `docs/DATA-MODEL.md` §6.
+- [x] **F1-08 · P0:** Tetapkan strategi waktu keyframe agar konversi detik → frame pada R2 tidak membulatkan gerakan lama tanpa disadari. Catat kebijakan fps dan toleransi migrasi. — `docs/DATA-MODEL.md` §5: penyimpanan detik, grid 0,1 s, toleransi 0,05 s, fps shot default 24 (metadata), syarat penolakan konversi frame R2 (>1 mm / >0,05°).
+- [x] **F1-09 · P0:** Uji kesetaraan sampling sebelum/sesudah migrasi, roundtrip serialize, dan rollback migrasi gagal menggunakan fixture Fase 0. — `tests/migrate.test.js` (9 test) dan `tests/migration-browser.mjs`; unit total 16 → 41.
 
 **Kriteria keluar:** semua fixture valid termigrasi tanpa perubahan pose; invalid input tidak mengubah sumber; editor dapat membaca scene/shot default dari schema baru; regression R0 lulus.
 
@@ -143,7 +143,7 @@ Tujuan: menjadikan hasil output konsisten dengan preview dan siap dibagikan.
 Referensi: EX-01–EX-03, M4.
 Dependensi: Fase 4. Task riset F5-01 dapat dimulai setelah schema shot F1 tersedia.
 
-- [ ] **F5-01 · P0:** Lakukan spike encoder: WebCodecs, muxer, dukungan codec, memory budget dan error runtime. Catat opsi MP4/WebM, kebutuhan worker/server serta keputusan target fps/resolusi.
+- [x] **F5-01 · P0:** Lakukan spike encoder: WebCodecs, muxer, dukungan codec, memory budget dan error runtime. Catat opsi MP4/WebM, kebutuhan worker/server serta keputusan target fps/resolusi. — hasil di `docs/SPIKE-ENCODER.md`; probe `tests/spike/encoder-probe.mjs` → `artifacts/encoder-probe.json`; usulan D-04 tercatat. Keputusan final fps/resolusi/format masih milik pemilik produk.
 - [ ] **F5-02 · P0:** Buat dialog ekspor shot/range, resolution/fps/codec yang didukung, penamaan proyek_scene_shot, progress, cancel, retry dan pesan unsupported.
 - [ ] **F5-03 · P0:** Render dari snapshot revision immutable. Edit setelah job dimulai tidak mengubah hasil job tersebut; tutup stream dan resource pada selesai/cancel/error.
 - [ ] **F5-04 · P0:** Implementasikan sampling timestamp/frame eksplisit dan pipeline encode/mux. Video 10 detik ×30 fps memiliki tepat 300 frame; output dapat dibuka dan di-seek.
@@ -237,7 +237,7 @@ Semua task di fase ini P2 dan belum menjadi komitmen rilis. Dahului implementasi
 | D-01 | Lokal dahulu atau cloud wajib? | R1 lokal tanpa akun | F1/F2; cloud sebelum F7 |
 | D-02 | Makna proyek dan ownership shot | Proyek film → scene → shot | F1-01 |
 | D-03 | Prioritas R2 | Shot/timeline/export sebelum GLB | F4/F5/F8-01 |
-| D-04 | MP4 wajib, resolusi dan fps target? | Belum diputuskan; MediaRecorder lama tetap fallback | F1-08, F5-01/F5-04 |
+| D-04 | MP4 wajib, resolusi dan fps target? | Belum diputuskan; MediaRecorder lama tetap fallback. **Usulan F5-01 (`docs/SPIKE-ENCODER.md` §11):** default 30 fps (opsi 24/25, hanya integer), default 1280×720 (opsi 1920×1080, dimensi dibulatkan kelipatan 2), format default WebM/VP9 via WebCodecs + muxer WebM buatan sendiri (nol dependency, terbukti 300 frame / 10,000000 s lolos `ffprobe`), MP4/H.264 `avc1.640028` hanya bila dependency `mp4-muxer` (MIT) disetujui, fallback MediaRecorder real-time diberi label dan tidak dihitung memenuhi gate deterministik. Jangan minta `hardwareAcceleration: 'prefer-hardware'` (ditolak semua codec pada mesin uji) | F1-08, F5-01/F5-04 |
 | D-05 | Hide global atau editor/render terpisah? | Pertahankan global sampai migrasi eksplisit | F4-09 |
 | D-06 | Rig, putaran >360° dan batas beban nyata | Langkah prosedural + yaw untuk baseline | F6-01, F8-02 |
 | D-07 | Provider, region, budget, akses tim | Belum diputuskan | F7-01/F7-06 |
@@ -259,6 +259,7 @@ npm run dev -- --port 5174 --strictPort
 node tests/browser-smoke.mjs
 node tests/editor-regression.mjs
 node tests/walk-doors-delete.mjs
+node tests/migration-browser.mjs
 ```
 
 Tambahkan suite repository/migrasi, multi-tab, multi-scene/shot dan deterministic export saat fase terkait dibangun. Jalankan pengujian yang relevan terhadap perubahan; jalankan gate lengkap pada akhir fase/rilis.
@@ -268,7 +269,19 @@ Tambahkan suite repository/migrasi, multi-tab, multi-scene/shot dan deterministi
 | Tanggal | Task | Status | Bukti / catatan |
 |---|---|---|---|
 | 2026-09-08 | Penyusunan plan | Selesai | Diterjemahkan dari PRD v1.1 dan pembaruan implementasi; belum memulai task R1 |
+| 2026-09-08 | F0-08 fixture v1 | Selesai | `tests/fixtures/v1/` — 6 fixture valid (demo, kamera null, scene kosong, locked/hidden, pintu, jalur berjalan) + 8 fixture invalid (versi, keyframe, ID ganda, pintu, target kamera, keyframe di luar durasi, flag lock, bukan proyek). Generator `tests/fixtures/generate.mjs`; diuji `tests/fixtures.test.js` |
+| 2026-09-08 | F0-09 baseline pose | Selesai | `tests/fixtures/baseline/*.json` berisi pose sample awal/tengah/akhir, sudut langkah, wall crossing dan panel dinding per fixture; dibandingkan otomatis. Screenshot observer/final + ekspor video dari browser test di `artifacts/` (bukan satu-satunya bukti) |
+| 2026-09-08 | F0-10 baseline lingkungan | Selesai | macOS 26.2 (Darwin 25.2.0, arm64), Node v22.21.1, Chrome 152.0.7977.76 headless (`channel:'chrome'`), Vite 7, dev server port 5174. Hasil sebelum refactor: `npm test` 16/16, `npm run build` lulus, 3 browser test lulus. Keterbatasan: satu mesin, satu browser, tanpa uji Safari/Firefox dan tanpa uji beban |
+| 2026-09-08 | F1-01 kontrak data | Selesai | `docs/DATA-MODEL.md` §1–§4: Project/Scene/Shot/Object/Camera/Track/Asset/Revision/ExportJob/SessionState, UUID, timestamp, `schemaVersion=2` dan pemilik tiap field |
+| 2026-09-08 | F1-02 validator schema v2 | Selesai | `src/schema.js`; menolak referensi lintas proyek/scene, ID ganda, track yatim, kamera mengikuti aktor asing, pintu invalid, flag non-boolean dan pelanggaran `LIMITS`. Kamera `null` tetap sah |
+| 2026-09-08 | F1-03 pemisahan document/UI state | Selesai | `src/document.js`; `writeSceneView` hanya menyentuh scene+shot aktif. Test: mutasi scene 2 tidak mengubah scene 1, pindah scene menyimpan perubahan sebelumnya |
+| 2026-09-08 | F1-04 command/history | Selesai | `src/commands.js`; scope undo per `doc.id`, undo memulihkan scene aktif, transaksi gestur (drag/keyboard/rekam) = satu langkah, `runBulk` melewati item terkunci dan mengembalikan daftar `skipped` (dipakai pada pemendekan durasi) |
+| 2026-09-08 | F1-05 ekstraksi batas modul | Selesai | `src/scene-renderer.js` (Three.js), `src/timeline-engine.js` (`sampleScene` dipakai preview dan ekspor), `src/export-service.js` (MediaRecorder), `src/storage.js`. `src/main.js` 52 KB → 39 KB, tanpa impor Three.js. 4 browser test lulus tanpa perubahan perilaku |
+| 2026-09-08 | F1-06/F1-07 migrator copy-first | Selesai | `src/migrate.js` + `src/storage.js`; v1 → satu proyek/satu scene/satu shot, sumber tidak pernah dimutasi, cadangan `blocking-room.backup`, `SchemaTooNewError` tidak membuka dan tidak menimpa dokumen yang lebih baru |
+| 2026-09-08 | F1-08 strategi waktu keyframe | Selesai | `docs/DATA-MODEL.md` §5: satuan detik, grid 0,1 s, toleransi 0,05 s, fps default 24 sebagai metadata, dan syarat penolakan konversi ke frame pada R2 |
+| 2026-09-08 | F1-09 uji migrasi | Selesai | `tests/migrate.test.js` (kesetaraan pose vs golden Fase 0, roundtrip serialize, rollback, schema lebih baru), `tests/document.test.js`, `tests/migration-browser.mjs`. Gate akhir: `npm test` 41/41, `npm run build` lulus, 4 browser test lulus |
+| 2026-09-08 | F5-01 spike encoder | Selesai | `docs/SPIKE-ENCODER.md`; probe `tests/spike/encoder-probe.mjs` + `encoder-probe.html` di Chrome 152 macOS arm64. Bukti: `artifacts/encoder-probe.json` (66/78 config VideoEncoder didukung), muxer WebM minimal buatan sendiri menghasilkan `artifacts/encoder-probe-webcodecs.webm` — `ffprobe`: vp9 1280x720 30/1, `nb_read_frames=300`, `duration=10.000000`, seek 5 s berhasil. Tidak ada dependency baru; `npm test` 16/16 dan `npm run build` lulus |
 
 ## Langkah berikutnya
 
-Mulai **F0-08–F0-10** untuk baseline migrasi, kemudian **F1-01–F1-03** untuk kontrak data proyek/scene/shot. Jangan langsung mengganti localStorage atau membangun dashboard sebelum kontrak dan strategi migrasi aman tersedia.
+Fase 0 dan Fase 1 selesai (laporan: `docs/handoff/phase0-1-report.md`). Lanjutkan ke **Fase 2** mulai dari **F2-01** (`ProjectRepository` IndexedDB) di atas dokumen schema v2 yang sudah ada, lalu **F2-02** memindahkan migrasi localStorage → repository dengan penanda migrasi. Jangan membangun dashboard (Fase 3) sebelum autosave atomik, recovery dan isolasi tab terbukti.

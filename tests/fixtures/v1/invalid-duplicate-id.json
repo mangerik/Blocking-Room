@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "title": "Pertemuan di galeri",
+  "duration": 12,
+  "actors": [
+    {
+      "id": "a1",
+      "name": "Alex",
+      "color": "#c16e51",
+      "height": 1.78,
+      "keys": [
+        {
+          "t": 0,
+          "x": -5,
+          "z": 2,
+          "r": 0
+        },
+        {
+          "t": 5,
+          "x": -1,
+          "z": 2,
+          "r": 0
+        },
+        {
+          "t": 12,
+          "x": 4,
+          "z": 0,
+          "r": 90
+        }
+      ],
+      "locked": false,
+      "visible": true
+    },
+    {
+      "id": "a2",
+      "name": "Maya",
+      "color": "#477f77",
+      "height": 1.68,
+      "keys": [
+        {
+          "t": 0,
+          "x": 4,
+          "z": -1,
+          "r": 180
+        },
+        {
+          "t": 7,
+          "x": 3,
+          "z": 1,
+          "r": 180
+        },
+        {
+          "t": 12,
+          "x": 2,
+          "z": 1,
+          "r": 180
+        }
+      ],
+      "locked": false,
+      "visible": true
+    },
+    {
+      "id": "a3",
+      "name": "Figuran 01",
+      "color": "#d3ac50",
+      "height": 1.75,
+      "keys": [
+        {
+          "t": 0,
+          "x": 1,
+          "z": -3,
+          "r": 0
+        }
+      ],
+      "locked": false,
+      "visible": true
+    }
+  ],
+  "rooms": [
+    {
+      "id": "a1",
+      "name": "Foyer",
+      "x": -5,
+      "z": 0,
+      "w": 6,
+      "d": 8,
+      "h": 3,
+      "color": "#b5c2c0",
+      "locked": true,
+      "visible": true,
+      "doors": []
+    },
+    {
+      "id": "r2",
+      "name": "Galeri utama",
+      "x": 3,
+      "z": 0,
+      "w": 10,
+      "d": 8,
+      "h": 3.2,
+      "color": "#d4c7ad",
+      "doors": [
+        {
+          "wall": "left",
+          "offset": 2,
+          "width": 1.6,
+          "height": 2.3
+        }
+      ],
+      "locked": true,
+      "visible": true
+    },
+    {
+      "id": "r3",
+      "name": "Ruang samping",
+      "x": 4,
+      "z": -6,
+      "w": 8,
+      "d": 4,
+      "h": 3,
+      "color": "#b6c7b3",
+      "locked": true,
+      "visible": true,
+      "doors": []
+    }
+  ],
+  "camera": {
+    "id": "camera",
+    "name": "Kamera A",
+    "focal": 35,
+    "target": "a1",
+    "keys": [
+      {
+        "t": 0,
+        "x": -7,
+        "y": 2.2,
+        "z": 6,
+        "tx": -4,
+        "ty": 1.2,
+        "tz": 1
+      },
+      {
+        "t": 6,
+        "x": -1,
+        "y": 2,
+        "z": 6,
+        "tx": 1,
+        "ty": 1.2,
+        "tz": 1
+      },
+      {
+        "t": 12,
+        "x": 5,
+        "y": 2.2,
+        "z": 5,
+        "tx": 3,
+        "ty": 1.2,
+        "tz": 0
+      }
+    ],
+    "locked": false,
+    "visible": true
+  }
+}

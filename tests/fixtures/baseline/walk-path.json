@@ -1,0 +1,196 @@
+{
+  "title": "Jalur berjalan",
+  "duration": 10,
+  "times": [
+    0,
+    5,
+    10
+  ],
+  "actors": [
+    {
+      "id": "walker",
+      "name": "Pejalan",
+      "height": 1.78,
+      "color": "#c16e51",
+      "locked": false,
+      "visible": true,
+      "keyCount": 3,
+      "poses": [
+        {
+          "t": 0,
+          "x": -6,
+          "z": 0,
+          "r": 90
+        },
+        {
+          "t": 5,
+          "x": -0.666667,
+          "z": 0,
+          "r": 90
+        },
+        {
+          "t": 10,
+          "x": 6,
+          "z": 0,
+          "r": 90
+        }
+      ],
+      "gait": [
+        {
+          "t": 0,
+          "angle": 0,
+          "speed": 0
+        },
+        {
+          "t": 5,
+          "angle": -0.41863,
+          "speed": 1.333333
+        },
+        {
+          "t": 10,
+          "angle": 0,
+          "speed": 0
+        }
+      ],
+      "crossings": []
+    },
+    {
+      "id": "idle",
+      "name": "Diam",
+      "height": 1.6,
+      "color": "#477f77",
+      "locked": false,
+      "visible": true,
+      "keyCount": 2,
+      "poses": [
+        {
+          "t": 0,
+          "x": 2,
+          "z": -3,
+          "r": 350
+        },
+        {
+          "t": 5,
+          "x": 2,
+          "z": -3,
+          "r": 360
+        },
+        {
+          "t": 10,
+          "x": 2,
+          "z": -3,
+          "r": 10
+        }
+      ],
+      "gait": [
+        {
+          "t": 0,
+          "angle": 0,
+          "speed": 0
+        },
+        {
+          "t": 5,
+          "angle": 0,
+          "speed": 0
+        },
+        {
+          "t": 10,
+          "angle": 0,
+          "speed": 0
+        }
+      ],
+      "crossings": []
+    }
+  ],
+  "rooms": [
+    {
+      "id": "hall",
+      "name": "Koridor",
+      "locked": true,
+      "visible": true,
+      "box": [
+        0,
+        0,
+        8,
+        6,
+        3
+      ],
+      "doors": [
+        {
+          "wall": "left",
+          "offset": 0,
+          "width": 1.6,
+          "height": 2.4
+        }
+      ],
+      "panels": {
+        "back": [
+          [
+            0,
+            1.5,
+            8,
+            3
+          ]
+        ],
+        "left": [
+          [
+            -1.9,
+            1.5,
+            2.2,
+            3
+          ],
+          [
+            1.9,
+            1.5,
+            2.2,
+            3
+          ],
+          [
+            0,
+            2.7,
+            1.6,
+            0.6
+          ]
+        ]
+      }
+    }
+  ],
+  "camera": {
+    "id": "camera",
+    "name": "Kamera A",
+    "focal": 35,
+    "target": "",
+    "locked": false,
+    "visible": true,
+    "keyCount": 2,
+    "poses": [
+      {
+        "t": 0,
+        "x": -8,
+        "y": 2,
+        "z": 8,
+        "tx": -6,
+        "ty": 1.2,
+        "tz": 0
+      },
+      {
+        "t": 5,
+        "x": 0,
+        "y": 2,
+        "z": 8,
+        "tx": 0,
+        "ty": 1.2,
+        "tz": 0
+      },
+      {
+        "t": 10,
+        "x": 8,
+        "y": 2,
+        "z": 8,
+        "tx": 6,
+        "ty": 1.2,
+        "tz": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Blocking Room — encoder probe</title>
+</head>
+<body>
+<h1>Encoder probe</h1>
+<pre id="log">menunggu…</pre>
+<script type="module">
+const log = (m) => { document.getElementById('log').textContent += '\n' + m; };
+
+const CODECS = [
+  {id: 'avc1.42E01E', label: 'H.264 Baseline 3.0', container: 'mp4'},
+  {id: 'avc1.42001F', label: 'H.264 Baseline 3.1', container: 'mp4'},
+  {id: 'avc1.4D401F', label: 'H.264 Main 3.1', container: 'mp4'},
+  {id: 'avc1.4D4028', label: 'H.264 Main 4.0', container: 'mp4'},
+  {id: 'avc1.640028', label: 'H.264 High 4.0', container: 'mp4'},
+  {id: 'avc1.640033', label: 'H.264 High 5.1', container: 'mp4'},
+  {id: 'hvc1.1.6.L93.B0', label: 'HEVC Main L3.1', container: 'mp4'},
+  {id: 'vp8', label: 'VP8', container: 'webm'},
+  {id: 'vp09.00.10.08', label: 'VP9 Profile 0 L1.0 8bit', container: 'webm'},
+  {id: 'vp09.00.31.08', label: 'VP9 Profile 0 L3.1 8bit', container: 'webm'},
+  {id: 'vp09.00.41.08', label: 'VP9 Profile 0 L4.1 8bit', container: 'webm'},
+  {id: 'av01.0.04M.08', label: 'AV1 Main L3.0 8bit', container: 'webm/mp4'},
+  {id: 'av01.0.05M.08', label: 'AV1 Main L3.1 8bit', container: 'webm/mp4'}
+];
+const SIZES = [{w: 1280, h: 720}, {w: 1920, h: 1080}];
+const FPS = [24, 25, 30];
+const MIMES = [
+  'video/webm', 'video/webm;codecs=vp8', 'video/webm;codecs=vp9',
+  'video/webm;codecs=vp9,opus', 'video/webm;codecs=av01', 'video/webm;codecs=h264',
+  'video/x-matroska;codecs=avc1', 'video/mp4', 'video/mp4;codecs=avc1.42E01E',
+  'video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+  'video/mp4;codecs=vp09.00.10.08', 'video/mp4;codecs=av01.0.04M.08',
+  'video/mp4;codecs=hvc1.1.6.L93.B0'
+];
+
+function bitrateFor(w, h, fps) { return Math.round(w * h * fps * 0.12); }
+
+async function probeConfigs() {
+  const out = [];
+  for (const c of CODECS) {
+    for (const s of SIZES) {
+      for (const f of FPS) {
+        const config = {
+          codec: c.id, width: s.w, height: s.h, framerate: f,
+          bitrate: bitrateFor(s.w, s.h, f), bitrateMode: 'variable',
+          latencyMode: 'quality'
+        };
+        if (c.id.startsWith('avc1') || c.id.startsWith('hvc1')) config.avc = {format: 'avc'};
+        const row = {codec: c.id, label: c.label, container: c.container, width: s.w, height: s.h, fps: f};
+        try {
+          const r = await VideoEncoder.isConfigSupported(config);
+          row.supported = !!r.supported;
+          row.resolved = r.config ? {
+            codec: r.config.codec,
+            hardwareAcceleration: r.config.hardwareAcceleration ?? null,
+            bitrate: r.config.bitrate ?? null,
+            bitrateMode: r.config.bitrateMode ?? null,
+            latencyMode: r.config.latencyMode ?? null
+          } : null;
+        } catch (e) {
+          row.supported = false;
+          row.error = String(e && e.name ? e.name + ': ' + e.message : e);
+        }
+        out.push(row);
+      }
+    }
+  }
+  return out;
+}
+
+async function probeAcceleration() {
+  const prefs = ['no-preference', 'prefer-hardware', 'prefer-software'];
+  const codecs = ['avc1.42E01E', 'vp09.00.31.08', 'vp8', 'av01.0.04M.08'];
+  const out = [];
+  for (const codec of codecs) {
+    for (const hardwareAcceleration of prefs) {
+      const config = {codec, width: 1280, height: 720, framerate: 30, bitrate: bitrateFor(1280, 720, 30), hardwareAcceleration};
+      if (codec.startsWith('avc1')) config.avc = {format: 'avc'};
+      try {
+        const r = await VideoEncoder.isConfigSupported(config);
+        out.push({codec, hardwareAcceleration, supported: !!r.supported});
+      } catch (e) {
+        out.push({codec, hardwareAcceleration, supported: false, error: String(e && e.message || e)});
+      }
+    }
+  }
+  return out;
+}
+
+function mem() {
+  const m = performance.memory;
+  return m ? {usedJSHeapSize: m.usedJSHeapSize, totalJSHeapSize: m.totalJSHeapSize, jsHeapSizeLimit: m.jsHeapSizeLimit} : null;
+}
+
+// Menggambar frame sintetis yang berubah tiap frame (mirip playhead previs).
+function drawFrame(ctx, w, h, i, total) {
+  const t = i / total;
+  ctx.fillStyle = '#1c2018';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#c5c8b3';
+  ctx.fillRect(0, h * 0.75, w, h * 0.25);
+  ctx.fillStyle = '#7d8c6d';
+  ctx.beginPath();
+  ctx.arc(w * (0.1 + 0.8 * t), h * 0.55, h * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `${Math.round(h * 0.08)}px monospace`;
+  ctx.fillText(`frame ${i}`, w * 0.04, h * 0.15);
+  // noise band supaya encoder tidak mendapat konten trivial
+  const img = ctx.createImageData(Math.round(w * 0.3), Math.round(h * 0.1));
+  for (let p = 0; p < img.data.length; p += 4) {
+    const v = (Math.imul(p + i * 2654435761, 2246822519) >>> 24);
+    img.data[p] = v; img.data[p + 1] = v ^ 0x55; img.data[p + 2] = v ^ 0xaa; img.data[p + 3] = 255;
+  }
+  ctx.putImageData(img, Math.round(w * 0.6), Math.round(h * 0.02));
+}
+
+async function encodeRun({codec, width, height, fps, frames, keyEvery}) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext('2d', {alpha: false, willReadFrequently: false});
+  const chunks = [];
+  const errors = [];
+  let bytes = 0, keyframes = 0, deltas = 0;
+  const timestamps = [];
+  const memBefore = mem();
+  const t0 = performance.now();
+  const encoder = new VideoEncoder({
+    output: (chunk, meta) => {
+      chunks.push(1);
+      bytes += chunk.byteLength;
+      timestamps.push(chunk.timestamp);
+      if (chunk.type === 'key') keyframes++; else deltas++;
+      if (chunks.length === 1) {
+        const d = meta && meta.decoderConfig;
+        encodeRun.lastDecoderConfig = d ? {
+          codec: d.codec,
+          codedWidth: d.codedWidth ?? null,
+          codedHeight: d.codedHeight ?? null,
+          descriptionBytes: d.description ? d.description.byteLength : 0
+        } : null;
+      }
+    },
+    error: (e) => errors.push(String(e && e.message || e))
+  });
+  const config = {
+    codec, width, height, framerate: fps,
+    bitrate: bitrateFor(width, height, fps), bitrateMode: 'variable', latencyMode: 'quality'
+  };
+  if (codec.startsWith('avc1')) config.avc = {format: 'avc'};
+  encoder.configure(config);
+  let maxQueue = 0;
+  const usPerFrame = 1e6 / fps;
+  for (let i = 0; i < frames; i++) {
+    drawFrame(ctx, width, height, i, frames);
+    // timestamp eksplisit = i/fps (mikrodetik), bukan waktu wall-clock.
+    const frame = new VideoFrame(canvas, {
+      timestamp: Math.round(i * usPerFrame),
+      duration: Math.round(usPerFrame)
+    });
+    encoder.encode(frame, {keyFrame: i % keyEvery === 0});
+    frame.close();
+    maxQueue = Math.max(maxQueue, encoder.encodeQueueSize);
+    if (encoder.encodeQueueSize > 8) {
+      await new Promise((r) => { const h = () => { encoder.removeEventListener('dequeue', h); r(); }; encoder.addEventListener('dequeue', h); });
+    }
+  }
+  const tSubmitted = performance.now();
+  await encoder.flush();
+  const t1 = performance.now();
+  const state = encoder.state;
+  encoder.close();
+  const memAfter = mem();
+  // cek monotonik + jarak tepat 1/fps
+  let monotonic = true, exactSpacing = true;
+  for (let i = 1; i < timestamps.length; i++) {
+    if (timestamps[i] <= timestamps[i - 1]) monotonic = false;
+    if (Math.abs((timestamps[i] - timestamps[i - 1]) - Math.round(usPerFrame)) > 1) exactSpacing = false;
+  }
+  return {
+    codec, width, height, fps, framesSubmitted: frames, keyEvery,
+    chunks: chunks.length, keyframes, deltas, bytes,
+    bytesPerFrame: chunks.length ? Math.round(bytes / chunks.length) : 0,
+    estimatedBitrateKbps: chunks.length ? Math.round((bytes * 8 * fps) / chunks.length / 1000) : 0,
+    drawAndSubmitMs: Math.round(tSubmitted - t0),
+    totalMs: Math.round(t1 - t0),
+    msPerFrame: +((t1 - t0) / frames).toFixed(2),
+    realtimeRatio: +(((frames / fps) * 1000) / (t1 - t0)).toFixed(2),
+    maxEncodeQueueSize: maxQueue,
+    firstTimestamp: timestamps[0] ?? null,
+    lastTimestamp: timestamps.at(-1) ?? null,
+    timestampsMonotonic: monotonic,
+    timestampSpacingExact: exactSpacing,
+    decoderConfig: encodeRun.lastDecoderConfig ?? null,
+    stateAfterFlush: state,
+    errors,
+    memBefore, memAfter,
+    heapDeltaBytes: memBefore && memAfter ? memAfter.usedJSHeapSize - memBefore.usedJSHeapSize : null
+  };
+}
+
+
+// ---------------------------------------------------------------------------
+// Muxer WebM minimal (bukti kelayakan "tulis sendiri" vs dependency).
+// Hanya video, satu track, TimestampScale 1 ms, cluster per keyframe, + Cues.
+// ---------------------------------------------------------------------------
+function vint(value) { // EBML unsigned integer dengan panjang minimal
+  const bytes = [];
+  let v = value;
+  do { bytes.unshift(v & 0xff); v = Math.floor(v / 256); } while (v > 0);
+  return Uint8Array.from(bytes);
+}
+function elementId(id) { // id sudah termasuk marker length
+  const bytes = [];
+  let v = id;
+  do { bytes.unshift(v & 0xff); v = Math.floor(v / 256); } while (v > 0);
+  return Uint8Array.from(bytes);
+}
+function sizeField(size) { // EBML data size, panjang 1..8 byte
+  for (let len = 1; len <= 8; len++) {
+    const max = Math.pow(2, 7 * len) - 1;
+    if (size < max) {
+      const bytes = new Uint8Array(len);
+      let v = size;
+      for (let i = len - 1; i >= 0; i--) { bytes[i] = v & 0xff; v = Math.floor(v / 256); }
+      bytes[0] |= 1 << (8 - len);
+      return bytes;
+    }
+  }
+  throw new Error('ukuran terlalu besar');
+}
+function concat(parts) {
+  let n = 0; for (const p of parts) n += p.length;
+  const out = new Uint8Array(n); let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+function el(id, payload) { return concat([elementId(id), sizeField(payload.length), payload]); }
+function uintEl(id, value) { return el(id, vint(value)); }
+function strEl(id, value) { return el(id, new TextEncoder().encode(value)); }
+function floatEl(id, value) { const b = new Uint8Array(8); new DataView(b.buffer).setFloat64(0, value); return el(id, b); }
+
+function muxWebM({chunks, width, height, codec, fps}) {
+  const codecId = codec.startsWith('vp09') ? 'V_VP9' : codec === 'vp8' ? 'V_VP8'
+    : codec.startsWith('av01') ? 'V_AV1' : null;
+  if (!codecId) throw new Error('codec tidak didukung muxer minimal: ' + codec);
+  const ebml = el(0x1A45DFA3, concat([
+    uintEl(0x4286, 1), uintEl(0x42F7, 1), uintEl(0x42F2, 4), uintEl(0x42F3, 8),
+    strEl(0x4282, 'webm'), uintEl(0x4287, 2), uintEl(0x4285, 2)
+  ]));
+  const info = el(0x1549A966, concat([
+    uintEl(0x2AD7B1, 1000000), // TimestampScale = 1 ms
+    strEl(0x4D80, 'blocking-room'), strEl(0x5741, 'blocking-room-spike'),
+    floatEl(0x4489, (chunks.at(-1).timestamp / 1000) + (1000 / fps)) // Duration (ms)
+  ]));
+  const tracks = el(0x1654AE6B, el(0xAE, concat([
+    uintEl(0xD7, 1), uintEl(0x73C5, 1), uintEl(0x83, 1),
+    strEl(0x86, codecId), uintEl(0x23E383, Math.round(1e9 / fps)),
+    el(0xE0, concat([uintEl(0xB0, width), uintEl(0xBA, height)]))
+  ])));
+
+  const clusters = []; const cuePoints = [];
+  let current = null; let clusterTimeMs = 0;
+  const flush = () => {
+    if (!current) return;
+    clusters.push(el(0x1F43B675, concat([uintEl(0xE7, clusterTimeMs), ...current])));
+  };
+  let bytesBeforeCluster = 0; // dihitung ulang setelah semua cluster jadi
+  const clusterStartTimes = [];
+  for (const c of chunks) {
+    const tMs = Math.round(c.timestamp / 1000);
+    if (!current || (c.type === 'key' && tMs - clusterTimeMs > 0)) {
+      flush(); current = []; clusterTimeMs = tMs; clusterStartTimes.push(tMs);
+    }
+    const rel = tMs - clusterTimeMs;
+    const header = new Uint8Array(4);
+    header[0] = 0x81; // track number 1 (vint)
+    new DataView(header.buffer).setInt16(1, rel);
+    header[3] = c.type === 'key' ? 0x80 : 0x00;
+    current.push(el(0xA3, concat([header, c.data])));
+  }
+  flush();
+
+  // Cues membutuhkan offset cluster relatif terhadap awal data Segment.
+  const headerLen = info.length + tracks.length;
+  let offset = headerLen;
+  for (let i = 0; i < clusters.length; i++) {
+    cuePoints.push(el(0xBB, concat([
+      uintEl(0xB3, clusterStartTimes[i]),
+      el(0xB7, concat([uintEl(0xF7, 1), uintEl(0xF1, offset)]))
+    ])));
+    offset += clusters[i].length;
+  }
+  const cues = el(0x1C53BB6B, concat(cuePoints));
+  const segmentPayload = concat([info, tracks, ...clusters, cues]);
+  const segment = el(0x18538067, segmentPayload);
+  return new Blob([ebml, segment], {type: 'video/webm'});
+}
+
+async function verifyPlayback(blob, expect) {
+  const url = URL.createObjectURL(blob);
+  const v = document.createElement('video');
+  v.muted = true; v.preload = 'auto'; v.src = url;
+  const out = {sizeBytes: blob.size};
+  try {
+    await new Promise((res, rej) => {
+      const to = setTimeout(() => rej(new Error('timeout loadedmetadata')), 10000);
+      v.onloadedmetadata = () => { clearTimeout(to); res(); };
+      v.onerror = () => { clearTimeout(to); rej(new Error('video error ' + (v.error && v.error.code))); };
+    });
+    out.duration = v.duration;
+    out.videoWidth = v.videoWidth;
+    out.videoHeight = v.videoHeight;
+    const target = Math.min(expect.durationSec * 0.5, Math.max(0, v.duration - 0.1));
+    await new Promise((res, rej) => {
+      const to = setTimeout(() => rej(new Error('timeout seeked')), 10000);
+      v.onseeked = () => { clearTimeout(to); res(); };
+      v.currentTime = target;
+    });
+    out.seekTarget = target;
+    out.seekedTo = v.currentTime;
+    out.seekOk = Math.abs(v.currentTime - target) < 0.2;
+    // gambar frame hasil seek untuk memastikan decode benar-benar jalan
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 36;
+    c.getContext('2d').drawImage(v, 0, 0, 64, 36);
+    const d = c.getContext('2d').getImageData(0, 0, 64, 36).data;
+    let nonBlack = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 20) nonBlack++;
+    out.decodedNonBlackPixels = nonBlack;
+  } catch (e) {
+    out.error = String(e.message || e);
+  } finally {
+    v.src = ''; URL.revokeObjectURL(url);
+  }
+  return out;
+}
+
+async function muxProbe({codec, width, height, fps, frames}) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext('2d', {alpha: false});
+  const chunks = [];
+  const encoder = new VideoEncoder({
+    output: (chunk) => {
+      const data = new Uint8Array(chunk.byteLength);
+      chunk.copyTo(data);
+      chunks.push({type: chunk.type, timestamp: chunk.timestamp, data});
+    },
+    error: (e) => { chunks.error = String(e.message || e); }
+  });
+  encoder.configure({codec, width, height, framerate: fps, bitrate: bitrateFor(width, height, fps), latencyMode: 'quality'});
+  const usPerFrame = 1e6 / fps;
+  for (let i = 0; i < frames; i++) {
+    drawFrame(ctx, width, height, i, frames);
+    const f = new VideoFrame(canvas, {timestamp: Math.round(i * usPerFrame), duration: Math.round(usPerFrame)});
+    encoder.encode(f, {keyFrame: i % fps === 0});
+    f.close();
+    if (encoder.encodeQueueSize > 8) await new Promise((r) => { const h = () => { encoder.removeEventListener('dequeue', h); r(); }; encoder.addEventListener('dequeue', h); });
+  }
+  const tEnc0 = performance.now();
+  await encoder.flush();
+  const tEnc1 = performance.now();
+  encoder.close();
+  const tMux0 = performance.now();
+  const blob = muxWebM({chunks, width, height, codec, fps});
+  (window.__muxBlobs = window.__muxBlobs || {})[`${codec}-${width}x${height}-${fps}`] = blob;
+  const tMux1 = performance.now();
+  const play = await verifyPlayback(blob, {durationSec: frames / fps});
+  let totalChunkBytes = 0; for (const c of chunks) totalChunkBytes += c.data.length;
+  return {
+    codec, width, height, fps, frames,
+    chunkCount: chunks.length,
+    keyChunks: chunks.filter((c) => c.type === 'key').length,
+    chunkBytes: totalChunkBytes,
+    peakChunkBufferMB: +(totalChunkBytes / 1048576).toFixed(2),
+    flushMs: Math.round(tEnc1 - tEnc0),
+    muxMs: +(tMux1 - tMux0).toFixed(2),
+    fileBytes: blob.size,
+    containerOverheadBytes: blob.size - totalChunkBytes,
+    expectedDurationSec: frames / fps,
+    playback: play
+  };
+}
+
+async function run() {
+  const result = {
+    startedAt: new Date().toISOString(),
+    ua: navigator.userAgent,
+    userAgentData: navigator.userAgentData ? {
+      brands: navigator.userAgentData.brands, platform: navigator.userAgentData.platform, mobile: navigator.userAgentData.mobile
+    } : null,
+    hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+    deviceMemoryGB: navigator.deviceMemory ?? null,
+    secureContext: self.isSecureContext,
+    origin: location.origin + location.pathname,
+    features: {
+      VideoEncoder: typeof VideoEncoder !== 'undefined',
+      VideoFrame: typeof VideoFrame !== 'undefined',
+      VideoDecoder: typeof VideoDecoder !== 'undefined',
+      AudioEncoder: typeof AudioEncoder !== 'undefined',
+      EncodedVideoChunk: typeof EncodedVideoChunk !== 'undefined',
+      OffscreenCanvas: typeof OffscreenCanvas !== 'undefined',
+      MediaRecorder: typeof MediaRecorder !== 'undefined',
+      captureStream: typeof HTMLCanvasElement !== 'undefined' && 'captureStream' in HTMLCanvasElement.prototype,
+      captureStreamRequestFrame: false,
+      MediaStreamTrackProcessor: typeof MediaStreamTrackProcessor !== 'undefined',
+      showSaveFilePicker: typeof showSaveFilePicker !== 'undefined',
+      storageEstimate: !!(navigator.storage && navigator.storage.estimate),
+      performanceMemory: !!performance.memory,
+      workerVideoEncoder: null
+    },
+    mediaRecorder: {},
+    videoEncoderConfigs: [],
+    acceleration: [],
+    encodeRuns: [],
+    notes: []
+  };
+
+  // captureStream + requestFrame (pacing manual)
+  try {
+    const c = document.createElement('canvas');
+    c.width = 320; c.height = 180;
+    c.getContext('2d').fillRect(0, 0, 10, 10);
+    const st = c.captureStream(0);
+    const tr = st.getVideoTracks()[0];
+    result.features.captureStreamRequestFrame = typeof tr.requestFrame === 'function';
+    result.captureStreamTrack = {
+      kind: tr.kind,
+      settings: tr.getSettings ? tr.getSettings() : null,
+      hasRequestFrame: typeof tr.requestFrame === 'function'
+    };
+    tr.stop();
+  } catch (e) { result.notes.push('captureStream probe gagal: ' + e.message); }
+
+  // VideoEncoder di dalam Worker (untuk arsitektur ExportService)
+  try {
+    const src = `self.postMessage({ve: typeof VideoEncoder !== 'undefined', vf: typeof VideoFrame !== 'undefined', oc: typeof OffscreenCanvas !== 'undefined'});`;
+    const url = URL.createObjectURL(new Blob([src], {type: 'text/javascript'}));
+    const w = new Worker(url, {type: 'module'});
+    result.features.workerVideoEncoder = await new Promise((res) => {
+      const to = setTimeout(() => res(null), 3000);
+      w.onmessage = (e) => { clearTimeout(to); res(e.data); };
+    });
+    w.terminate(); URL.revokeObjectURL(url);
+  } catch (e) { result.notes.push('worker probe gagal: ' + e.message); }
+
+  if (typeof MediaRecorder !== 'undefined') {
+    for (const m of MIMES) {
+      try { result.mediaRecorder[m] = MediaRecorder.isTypeSupported(m); }
+      catch (e) { result.mediaRecorder[m] = 'error: ' + e.message; }
+    }
+  }
+  log('MediaRecorder selesai');
+
+  if (typeof VideoEncoder === 'undefined') {
+    result.notes.push('WebCodecs VideoEncoder tidak tersedia; probe encode dilewati.');
+    return result;
+  }
+
+  result.videoEncoderConfigs = await probeConfigs();
+  log('isConfigSupported selesai: ' + result.videoEncoderConfigs.length + ' kombinasi');
+  result.acceleration = await probeAcceleration();
+  log('probe acceleration selesai');
+
+  const supportedAt720 = new Set(
+    result.videoEncoderConfigs.filter((r) => r.supported && r.width === 1280 && r.fps === 30).map((r) => r.codec)
+  );
+  const runList = [
+    {codec: 'vp09.00.31.08', width: 1280, height: 720, fps: 30, frames: 60, keyEvery: 30},
+    {codec: 'vp8', width: 1280, height: 720, fps: 30, frames: 60, keyEvery: 30},
+    {codec: 'avc1.42E01E', width: 1280, height: 720, fps: 30, frames: 60, keyEvery: 30},
+    {codec: 'avc1.640028', width: 1280, height: 720, fps: 30, frames: 60, keyEvery: 30},
+    {codec: 'av01.0.04M.08', width: 1280, height: 720, fps: 30, frames: 60, keyEvery: 30},
+    {codec: 'vp09.00.41.08', width: 1920, height: 1080, fps: 30, frames: 60, keyEvery: 30},
+    {codec: 'avc1.640028', width: 1920, height: 1080, fps: 30, frames: 60, keyEvery: 30},
+    {codec: 'vp09.00.31.08', width: 1280, height: 720, fps: 24, frames: 60, keyEvery: 30},
+    {codec: 'vp09.00.31.08', width: 1280, height: 720, fps: 25, frames: 60, keyEvery: 30},
+    {codec: 'vp09.00.31.08', width: 1280, height: 720, fps: 30, frames: 300, keyEvery: 30}
+  ];
+  for (const r of runList) {
+    const ok = result.videoEncoderConfigs.some((c) => c.codec === r.codec && c.width === r.width && c.fps === r.fps && c.supported);
+    if (!ok) { result.encodeRuns.push({...r, skipped: 'config tidak didukung'}); continue; }
+    try {
+      const res = await encodeRun(r);
+      result.encodeRuns.push(res);
+      log(`encode ${r.codec} ${r.width}x${r.height}@${r.fps} x${r.frames}: ${res.chunks} chunk, ${res.totalMs} ms`);
+    } catch (e) {
+      result.encodeRuns.push({...r, failed: String(e && e.message || e)});
+      log(`encode ${r.codec} GAGAL: ${e.message}`);
+    }
+    await new Promise((r2) => setTimeout(r2, 60));
+  }
+
+  // uji perilaku error runtime yang harus ditangani ExportService
+  result.runtimeErrors = [];
+  const errCases = [
+    {name: 'config-tidak-valid (width 0)', fn: async () => { const e = new VideoEncoder({output(){}, error(){}}); e.configure({codec: 'vp8', width: 0, height: 720, bitrate: 1e6, framerate: 30}); e.close(); }},
+    {name: 'codec-tidak-dikenal', fn: async () => { const e = new VideoEncoder({output(){}, error(){}}); e.configure({codec: 'bogus.1', width: 1280, height: 720, bitrate: 1e6, framerate: 30}); e.close(); }},
+    {name: 'encode-setelah-close', fn: async () => { const e = new VideoEncoder({output(){}, error(){}}); e.configure({codec: 'vp8', width: 320, height: 180, bitrate: 1e5, framerate: 30}); e.close(); const c = document.createElement('canvas'); c.width = 320; c.height = 180; c.getContext('2d').fillRect(0,0,1,1); const f = new VideoFrame(c, {timestamp: 0}); try { e.encode(f); } finally { f.close(); } }},
+    {name: 'encode-VideoFrame-tertutup', fn: async () => { const e = new VideoEncoder({output(){}, error(){}}); e.configure({codec: 'vp8', width: 320, height: 180, bitrate: 1e5, framerate: 30}); const c = document.createElement('canvas'); c.width = 320; c.height = 180; c.getContext('2d').fillRect(0,0,1,1); const f = new VideoFrame(c, {timestamp: 0}); f.close(); try { e.encode(f); } finally { e.close(); } }},
+    {name: 'VideoFrame-dari-canvas-0x0', fn: async () => { const c = document.createElement('canvas'); c.width = 0; c.height = 0; const f = new VideoFrame(c, {timestamp: 0}); f.close(); }}
+  ];
+  for (const c of errCases) {
+    try { await c.fn(); result.runtimeErrors.push({case: c.name, threw: false}); }
+    catch (e) { result.runtimeErrors.push({case: c.name, threw: true, name: e.name, message: e.message}); }
+  }
+
+  result.muxProbes = [];
+  const muxList = [
+    {codec: 'vp09.00.31.08', width: 1280, height: 720, fps: 30, frames: 300},
+    {codec: 'vp8', width: 1280, height: 720, fps: 30, frames: 90},
+    {codec: 'av01.0.04M.08', width: 1280, height: 720, fps: 30, frames: 90}
+  ];
+  for (const m of muxList) {
+    try { const r = await muxProbe(m); result.muxProbes.push(r); log(`mux ${m.codec}: ${r.fileBytes} B, playback ${JSON.stringify(r.playback)}`); }
+    catch (e) { result.muxProbes.push({...m, failed: String(e && e.message || e)}); log('mux gagal ' + e.message); }
+  }
+
+  if (navigator.storage && navigator.storage.estimate) {
+    try { result.storageEstimate = await navigator.storage.estimate(); } catch (e) { /* noop */ }
+  }
+  result.finishedAt = new Date().toISOString();
+  return result;
+}
+
+window.__probe = run().then((r) => { window.__probeResult = r; window.__probeDone = true; log('SELESAI'); return r; })
+  .catch((e) => { window.__probeResult = {fatal: String(e && e.stack || e)}; window.__probeDone = true; log('FATAL ' + e.message); });
+</script>
+</body>
+</html>
