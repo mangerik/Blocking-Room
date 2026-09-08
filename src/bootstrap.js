@@ -50,31 +50,17 @@ export async function bootstrap({
   }
 
   // --- migrasi sumber lama (berjalan juga saat repository mati, agar data tetap terlihat)
-  const raw = readLegacyRaw(storage);
   const marker = migrationMarker(storage);
-  let migratedDocument = null;
-  if (raw && !marker) {
-    try {
-      const opened = openProjectData(JSON.parse(raw));
-      backupLegacyRaw(raw, storage);
-      migratedDocument = opened.document;
-      result.migrated = opened.migrated;
-      if (result.repository) {
-        await result.repository.saveDocument(migratedDocument, {revision: true, revisionToken: 1});
-        // Penanda ditulis setelah commit sukses — bukan sebelumnya.
-        setMigrationMarker(migratedDocument.id, storage);
-        setActiveProjectId(migratedDocument.id, storage);
-      }
-    } catch (error) {
-      // SchemaTooNewError: dokumen tidak dibuka dan sumber tidak disentuh sama sekali.
-      if (!(error instanceof SchemaTooNewError)) backupLegacyRaw(raw, storage);
-      result.error = error;
-      migratedDocument = null;
-      if (error instanceof SchemaTooNewError) {
-        result.document = fallbackDocument();
-        result.readOnly = true;
-        return finish(result, repository, storage, lockFactory, onLockChange, {skipLock: true});
-      }
+  const legacy = await migrateLegacy(result.repository, storage);
+  let migratedDocument = legacy.document;
+  result.migrated = legacy.migrated;
+  if (legacy.error) {
+    result.error = legacy.error;
+    if (legacy.error instanceof SchemaTooNewError) {
+      // Dokumen tidak dibuka dan sumber tidak disentuh sama sekali.
+      result.document = fallbackDocument();
+      result.readOnly = true;
+      return finish(result, repository, storage, lockFactory, onLockChange, {skipLock: true});
     }
   }
 
@@ -125,7 +111,22 @@ export async function bootstrap({
  */
 async function adoptPending(result, doc, storage) {
   const pending = readPendingDocument(storage);
-  if (!pending || pending.projectId !== doc.id) return doc;
+  if (!pending) return doc;
+  if (pending.projectId !== doc.id) {
+    // Titipan milik proyek LAIN: pengguna berpindah proyek (atau dashboard membuka
+    // proyek berbeda) sebelum penyimpanan terakhir sempat commit. Perubahan itu tetap
+    // milik proyek asalnya — ditulis ke sana, tidak pernah ke proyek yang sedang dibuka,
+    // dan tidak boleh membuat proyek baru bila proyek asalnya sudah tidak ada.
+    try {
+      const stored = await result.repository.getDocument(pending.projectId);
+      if (stored && String(pending.savedAt) > String(stored.updatedAt)) {
+        const recovered = openProjectData(pending.doc).document;
+        if (recovered.id === pending.projectId) await result.repository.saveDocument(recovered, {revisionToken: Date.now()});
+      }
+    } catch {/* titipan rusak tidak boleh menghalangi editor terbuka */}
+    clearPendingDocument(storage);
+    return doc;
+  }
   try {
     if (!(String(pending.savedAt) > String(doc.updatedAt))) {clearPendingDocument(storage); return doc;}
     const recovered = openProjectData(pending.doc).document;
@@ -146,5 +147,59 @@ async function finish(result, repository, storage, lockFactory, onLockChange, {s
   result.lock = lock;
   const writer = await lock.acquire();
   if (!writer) result.readOnly = true;
+  return result;
+}
+
+/**
+ * Memindahkan sumber `blocking-room` (v1/v2) ke repository, sekali saja.
+ * Copy-first: sumber tidak dihapus dan tidak ditimpa, salinan mentah ditulis ke
+ * `blocking-room.backup`, dan penanda `blocking-room.migrated` ditulis HANYA setelah
+ * transaksi commit sehingga migrasi ulang tidak membuat proyek duplikat.
+ */
+async function migrateLegacy(repository, storage) {
+  const raw = readLegacyRaw(storage);
+  const marker = migrationMarker(storage);
+  const out = {document: null, migrated: false, error: null};
+  if (!raw || marker) return out;
+  try {
+    const opened = openProjectData(JSON.parse(raw));
+    backupLegacyRaw(raw, storage);
+    out.document = opened.document;
+    out.migrated = opened.migrated;
+    if (repository) {
+      await repository.saveDocument(out.document, {revision: true, revisionToken: 1});
+      // Penanda ditulis setelah commit sukses — bukan sebelumnya.
+      setMigrationMarker(out.document.id, storage);
+      setActiveProjectId(out.document.id, storage);
+    }
+  } catch (error) {
+    // SchemaTooNewError: sumber tidak disentuh sama sekali.
+    if (!(error instanceof SchemaTooNewError)) backupLegacyRaw(raw, storage);
+    out.error = error;
+    out.document = null;
+  }
+  return out;
+}
+
+/**
+ * Urutan buka dashboard (F3-01): repository + migrasi sumber lama, tanpa memuat
+ * dokumen, tanpa mengambil kunci writer dan tanpa SessionState. Dashboard hanya
+ * membaca store `projects`, sehingga membuka daftar tidak menyentuh dokumen sama sekali.
+ * @returns {Promise<{repository:ProjectRepository|null, error:Error|null,
+ *   unavailable:boolean, migrated:boolean}>}
+ */
+export async function bootstrapDashboard({repository = new ProjectRepository(), storage = globalThis.localStorage} = {}) {
+  const result = {repository: null, error: null, unavailable: false, migrated: false};
+  try {
+    await repository.open();
+    result.repository = repository;
+  } catch (error) {
+    result.unavailable = true;
+    result.error = error instanceof StorageUnavailableError ? error : new StorageUnavailableError(error);
+    return result;
+  }
+  const legacy = await migrateLegacy(result.repository, storage);
+  result.migrated = legacy.migrated;
+  if (legacy.error) result.error = legacy.error;
   return result;
 }

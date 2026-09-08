@@ -21,7 +21,7 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test tests/*.test.js",
-    "test:browser": "node tests/browser-smoke.mjs && node tests/editor-regression.mjs && node tests/walk-doors-delete.mjs && node tests/migration-browser.mjs && node tests/repository-browser.mjs",
+    "test:browser": "node tests/browser-smoke.mjs && node tests/editor-regression.mjs && node tests/walk-doors-delete.mjs && node tests/migration-browser.mjs && node tests/repository-browser.mjs && node tests/dashboard-browser.mjs",
     "check": "npm test && npm run build"
   },
   "dependencies": {

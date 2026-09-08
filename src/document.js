@@ -147,8 +147,16 @@ export class DocumentStore {
   /** Berpindah scene/shot: view aktif ditulis dahulu agar tidak ada perubahan yang hilang. */
   activate(sceneId, shotId) {
     this.flush();
-    const scene = findScene(this.doc, sceneId);
-    if (!scene) throw new Error('Scene tidak ditemukan.');
+    if (!findScene(this.doc, sceneId)) throw new Error('Scene tidak ditemukan.');
+    return this.reload(sceneId, shotId);
+  }
+  /**
+   * Membaca ulang view dari dokumen TANPA menulis view lama kembali.
+   * Dipakai setelah operasi scene (hapus/duplikasi/urutkan) ketika scene yang
+   * sedang dipegang view mungkin sudah tidak ada lagi di dokumen.
+   */
+  reload(sceneId = this.doc.activeSceneId, shotId) {
+    const scene = findScene(this.doc, sceneId) ?? this.doc.scenes[0];
     const shot = findShot(scene, shotId ?? scene.activeShotId) ?? scene.shots[0];
     this.doc.activeSceneId = scene.id;
     scene.activeShotId = shot.id;
@@ -188,6 +196,8 @@ export function cloneProjectDocument(doc, {id = newId, now = nowStamp, title} = 
       ...scene,
       id: remap(scene.id),
       projectId,
+      // Thumbnail milik proyek asal; salinan memakai placeholder sampai render pertama.
+      thumbnailRef: null,
       activeShotId: remap(scene.activeShotId),
       actors: scene.actors.map(a => ({...a, id: remap(a.id)})),
       setObjects: scene.setObjects.map(o => ({...o, id: remap(o.id)})),
@@ -201,4 +211,115 @@ export function cloneProjectDocument(doc, {id = newId, now = nowStamp, title} = 
       })),
     })),
   };
+}
+
+
+// ---------------------------------------------------------------------------
+// Operasi scene (F3-04). Semuanya memutasi dokumen di tempat dan mengembalikan
+// scene yang harus menjadi aktif; pemanggil bertanggung jawab memvalidasi dan
+// menyimpan lewat EditorSession, sehingga setiap operasi tetap satu langkah undo.
+// ---------------------------------------------------------------------------
+
+/** Menomori ulang `order` sesuai urutan array supaya validator selalu puas. */
+const renumber = scenes => scenes.forEach((scene, index) => {scene.order = index;});
+
+/** Nama scene berikutnya yang belum dipakai ("Scene 03", lalu "Scene 03 (2)"). */
+export function nextSceneName(doc, base) {
+  const taken = new Set(doc.scenes.map(s => s.name));
+  const preferred = base ?? `Scene ${String(doc.scenes.length + 1).padStart(2, '0')}`;
+  if (!taken.has(preferred)) return preferred;
+  for (let i = 2; i < 1000; i += 1) {
+    const candidate = `${preferred} (${i})`.slice(0, 100);
+    if (!taken.has(candidate)) return candidate;
+  }
+  return preferred;
+}
+
+/** Scene kosong baru dengan satu shot default. */
+export function addScene(doc, {name, duration = 12, id = newId} = {}) {
+  const sceneId = id(), shotId = id();
+  const scene = {
+    id: sceneId, projectId: doc.id, name: nextSceneName(doc, name), order: doc.scenes.length,
+    notes: '', thumbnailRef: null, activeShotId: shotId, actors: [], setObjects: [],
+    shots: [{id: shotId, sceneId, name: 'Shot 01', order: 0, duration, fps: DEFAULT_FPS,
+      aspectRatio: DEFAULT_ASPECT_RATIO, notes: '', cameraId: null, camera: null, tracks: []}],
+  };
+  doc.scenes.push(scene);
+  renumber(doc.scenes);
+  return scene;
+}
+
+/**
+ * Duplikasi scene dengan seluruh ID internal dipetakan ulang (aktor, set, shot,
+ * kamera dan track) sambil menjaga hubungan: track tetap menunjuk objeknya dan
+ * kamera tetap mengikuti karakter yang sama — versi salinannya.
+ */
+export function duplicateScene(doc, sceneId, {id = newId, name} = {}) {
+  const source = findScene(doc, sceneId);
+  if (!source) throw new Error('Scene tidak ditemukan.');
+  const map = new Map();
+  const remap = value => {
+    if (typeof value !== 'string' || value === '') return value;
+    if (!map.has(value)) map.set(value, id());
+    return map.get(value);
+  };
+  const copy = clone(source);
+  const newSceneId = remap(copy.id);
+  const scene = {
+    ...copy,
+    id: newSceneId,
+    projectId: doc.id,
+    name: nextSceneName(doc, name ?? `${source.name} (salinan)`.slice(0, 100)),
+    order: doc.scenes.length,
+    thumbnailRef: null,
+    activeShotId: remap(copy.activeShotId),
+    actors: copy.actors.map(a => ({...a, id: remap(a.id)})),
+    setObjects: copy.setObjects.map(o => ({...o, id: remap(o.id)})),
+    shots: copy.shots.map(shot => ({
+      ...shot,
+      id: remap(shot.id),
+      sceneId: newSceneId,
+      cameraId: shot.cameraId ? remap(shot.cameraId) : null,
+      camera: shot.camera ? {...shot.camera, id: remap(shot.camera.id), targetId: remap(shot.camera.targetId)} : null,
+      tracks: shot.tracks.map(t => ({...t, objectId: remap(t.objectId)})),
+    })),
+  };
+  doc.scenes.splice(doc.scenes.indexOf(source) + 1, 0, scene);
+  renumber(doc.scenes);
+  return scene;
+}
+
+/**
+ * Menghapus scene. Scene terakhir TIDAK boleh dihapus: proyek tanpa scene tidak
+ * valid, dan mengganti isi proyek dengan scene kosong secara diam-diam adalah
+ * kehilangan data yang tidak diminta. Pemanggil menampilkan pesannya.
+ */
+export function removeScene(doc, sceneId) {
+  if (doc.scenes.length <= 1) throw new Error('Proyek memerlukan minimal satu scene. Tambahkan scene lain sebelum menghapus yang ini.');
+  const index = doc.scenes.findIndex(s => s.id === sceneId);
+  if (index < 0) throw new Error('Scene tidak ditemukan.');
+  doc.scenes.splice(index, 1);
+  renumber(doc.scenes);
+  return doc.scenes[Math.min(index, doc.scenes.length - 1)];
+}
+
+/** Memindahkan scene satu langkah (`delta` −1/+1) dan menomori ulang `order`. */
+export function moveScene(doc, sceneId, delta) {
+  const index = doc.scenes.findIndex(s => s.id === sceneId);
+  const target = index + delta;
+  if (index < 0 || target < 0 || target >= doc.scenes.length) return null;
+  const [scene] = doc.scenes.splice(index, 1);
+  doc.scenes.splice(target, 0, scene);
+  renumber(doc.scenes);
+  return scene;
+}
+
+/** Mengganti nama scene; nama kosong ditolak agar validator tidak pernah gagal. */
+export function renameScene(doc, sceneId, name) {
+  const scene = findScene(doc, sceneId);
+  if (!scene) throw new Error('Scene tidak ditemukan.');
+  const trimmed = String(name ?? '').trim().slice(0, 100);
+  if (!trimmed) throw new Error('Nama scene tidak boleh kosong.');
+  scene.name = trimmed;
+  return scene;
 }

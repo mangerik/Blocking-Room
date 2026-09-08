@@ -163,3 +163,19 @@ export class ProjectLock {
     this.channel = null;
   }
 }
+
+/**
+ * Status writer sebuah proyek dari luar editor (dipakai dashboard, F3-09).
+ * Membaca heartbeat localStorage saja: dashboard tidak boleh mengambil kunci apa pun.
+ * @returns {{present:boolean, stale:boolean, at:number}}
+ */
+export function projectWriterStatus(projectId, {storage = globalThis.localStorage, now = () => Date.now(), staleMs = STALE_MS} = {}) {
+  let entry = null;
+  try {
+    const raw = storage?.getItem(heartbeatKey(projectId));
+    entry = raw ? JSON.parse(raw) : null;
+  } catch {entry = null;}
+  if (!entry) return {present: false, stale: true, at: 0};
+  const at = Number(entry.at ?? 0);
+  return {present: true, stale: (now() - at) > staleMs, at};
+}

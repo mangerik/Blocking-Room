@@ -70,6 +70,17 @@ The visual language deliberately stays simple. Geometric actors and lightweight 
 - Manipulate actors directly while looking through the final camera.
 - Delete and recreate the camera; export remains unavailable while no camera exists.
 
+### Projects and scenes
+
+- Browse every stored project on a dashboard with thumbnail, title, scene count, and last-modified date.
+- Search projects by title and sort by most recently modified or most recently opened.
+- Create an empty project or start from the built-in demo scene template.
+- Open, rename inline, and duplicate a project; duplicates remap every internal ID while keeping camera targets, tracks, and assets consistent.
+- Move a project to a 30-day trash, restore it with its contents intact, or delete it permanently after an explicit confirmation.
+- Add, rename, duplicate, reorder, switch, and delete scenes; each scene owns its own set, actors, and timeline.
+- Navigate with a project / scene / shot breadcrumb and return to the dashboard, which flushes pending saves and releases the writer lock first.
+- Edit the director's note, scene name, and camera name as stored data instead of fixed demo text.
+
 ### Editing safety
 
 - Undo and redo up to 100 document changes during the current browser session.
@@ -80,7 +91,12 @@ The visual language deliberately stays simple. Geometric actors and lightweight 
 
 ### Saving and output
 
-- Autosave the active document to browser `localStorage`.
+- Autosave the active document to IndexedDB within about a second of a finished gesture, atomically, with an honest save status.
+- Keep at least ten recovery snapshots per project and restore any of them as a single undo step.
+- Keep one writer tab per project; other tabs stay read-only and can take over or open a copy.
+- Store a 320 × 180 scene thumbnail after relevant changes; a failed thumbnail never fails a document save.
+- Export and import a single-file project package (`.blockingroom.json`) with a manifest and SHA-256 checksums per section.
+- Import legacy version 1 JSON as a new project without touching the projects you already have.
 - Download and reopen a JSON project backup.
 - Export the camera view as a 1280 × 720 reference video using the browser's supported recording codec.
 
@@ -208,25 +224,54 @@ Shortcuts do not run while typing in an input field. Locked or hidden items do n
 
 ## Project data and persistence
 
-The prototype currently stores one active document under the `blocking-room` key in browser `localStorage`. Saving through the header downloads a readable JSON backup; opening a JSON file validates it before replacing the active project.
+Projects are stored in the IndexedDB database `blocking-room` (`src/repository.js`), in five
+object stores: `projects` (dashboard metadata), `documents` (full schema v2 documents),
+`revisions` (recovery snapshots), `assets` (scene thumbnails), and `session` (per-project UI
+state such as the active scene, playhead, selection, and observer pose).
 
-The current schema is version `1` and stores:
+A single transaction writes `documents` + `projects` + `revisions`, so dashboard metadata can
+never point at content that failed to be written, and the header only reports *Tersimpan lokal*
+after the transaction commits.
 
-- project title and duration;
-- actors, colors, height, visibility, lock state, and position/rotation keyframes;
-- rooms, dimensions, visibility, lock state, and doorway definitions; and
-- an optional camera with focal length, target, visibility, lock state, and transform keyframes.
+`localStorage` is no longer the store of record. It only holds small values that must be read
+synchronously before IndexedDB opens: the legacy `blocking-room` document kept as a migration
+source (never overwritten), its raw backup, the migration marker, the active project id, the
+writer heartbeat, and the synchronous hand-off written when a tab closes before its last
+transaction commits.
 
-Older version 1 files without lock, visibility, or door fields are normalized on load. Invalid IDs, duplicate timestamps, out-of-range values, malformed doors, and broken camera targets are rejected.
+The current document schema is version `2` (`Project → Scene → Shot`); see
+[docs/DATA-MODEL.md](docs/DATA-MODEL.md). Version 1 files are migrated on load into one project
+with one scene and one shot, without changing a single pose. Older files without lock,
+visibility, or door fields are normalized. Invalid IDs, duplicate timestamps, out-of-range
+values, malformed doors, cross-scene references, and broken camera targets are rejected before
+anything is stored.
+
+### Routing
+
+| URL | Screen |
+|---|---|
+| `#/` | Project dashboard |
+| `#/trash` | Trash (projects deleted within the last 30 days) |
+| `#/project/<id>` | Editor for that project |
+| no hash | Editor for the most recently opened project; on a fresh install the demo project is created and opened |
+
+The plain URL deliberately opens the editor rather than the dashboard: continuing existing work
+is the common path, and the R0 regression suite loads the bare URL and expects the editor. The
+dashboard is always one click away from the editor (**Semua proyek**).
+
+### Trash and cleanup
+
+Deleting a project only stamps `deletedAt`; the document, its revisions, and its session state
+are untouched, so restoring it returns the project exactly as it was. Permanent deletion needs
+an explicit confirmation and removes metadata, document, session state, and every revision in
+one transaction. Because a local app has no background process, trash older than 30 days is
+purged **when the dashboard is opened**.
 
 Important persistence behavior:
 
-- Undo history exists only in memory and resets after a page reload.
-- Browser storage is not a permanent backup and can be cleared by the user or browser.
-- The editor currently manages one active project rather than a project dashboard.
-- Download a JSON backup before making large or experimental changes.
-
-Multi-project storage, IndexedDB, recovery snapshots, scene management, and safe multi-tab editing are specified in the [product requirements](docs/PRD.md) and [implementation plan](plan.md), but are not implemented yet.
+- Undo history exists only in memory and resets after a page reload; recovery snapshots are separate and survive reloads.
+- Browser storage is not a permanent backup and can be cleared by the user or the browser.
+- Export a project package or a JSON backup before making large or experimental changes.
 
 ## Video export
 
@@ -250,17 +295,23 @@ The roadmap includes explicit resolution, frame-rate, range, and codec settings;
 Blocking Room is a client-only JavaScript application:
 
 ```text
-Browser UI
-├── Scene explorer and inspector
-├── Observer/final viewports
-└── Timeline and transport
-        │
-        ▼
-Document state ──► history snapshots ──► localStorage / JSON
-        │
-        ├──► scene sampling ──► Three.js observer renderer
-        ├──► scene sampling ──► Three.js camera renderer
-        └──► camera canvas ──► MediaRecorder ──► video file
+Hash router (app.js)
+├── Dashboard  ──► project metadata only (projects store)
+└── Editor
+    ├── Scene explorer, scene list, and inspector
+    ├── Observer/final viewports
+    └── Timeline and transport
+            │
+            ▼
+    Scene view ──► document (schema v2) ──► validation ──► history snapshot
+            │                                   │
+            │                                   └──► autosave ──► IndexedDB
+            │                                          (documents + projects + revisions,
+            │                                           one transaction)
+            ├──► scene sampling ──► Three.js observer renderer
+            ├──► scene sampling ──► Three.js camera renderer
+            ├──► camera canvas ──► thumbnail ──► assets store
+            └──► camera canvas ──► MediaRecorder ──► video file
 ```
 
 Key design rules:
@@ -272,7 +323,8 @@ Key design rules:
 - Movement direction and actor facing are independent.
 - Door openings are generated as wall panels around a validated gap.
 
-The current entry point still owns substantial UI and editor orchestration. The roadmap separates repository, renderer, timeline, command/history, and export responsibilities before multi-project work expands the state model.
+- Every creative change goes through one path: scene view → document → validation → history → autosave. Navigation, selection, and playhead are UI state and never enter history.
+- Repository, renderer, timeline, command/history, autosave, tab lock, and export live in separate modules; `main.js` is editor orchestration only.
 
 ## Project structure
 
@@ -280,8 +332,26 @@ The current entry point still owns substantial UI and editor orchestration. The 
 .
 ├── index.html                 # Vite entry document
 ├── src/
-│   ├── main.js                # UI, Three.js scene, interaction, playback, export
-│   ├── model.js               # Initial document, keyframe sampling, validation
+│   ├── app.js                 # Hash router: dashboard, trash, or editor
+│   ├── routing.js             # Pure route parsing/building
+│   ├── dashboard.js           # Project dashboard, trash, import/export
+│   ├── dashboard-support.js   # Pure dashboard helpers (unique titles, dates)
+│   ├── main.js                # Editor UI, interaction, playback, export
+│   ├── bootstrap.js           # Open order: repository → migration → project → lock
+│   ├── repository.js          # IndexedDB store (projects/documents/revisions/assets/session)
+│   ├── autosave.js            # Coalesced atomic autosave with revision tokens
+│   ├── session-state.js       # Per-project UI state (scene, playhead, selection)
+│   ├── tab-lock.js            # One writer tab per project
+│   ├── document.js            # Schema v2 document store, scene view, scene operations
+│   ├── commands.js            # Command/history boundary, read-only enforcement
+│   ├── schema.js              # Schema v2 validator and limits
+│   ├── migrate.js             # Version 1 → version 2 migration
+│   ├── package.js             # `.blockingroom.json` package build/read with checksums
+│   ├── scene-renderer.js      # Three.js boundary
+│   ├── timeline-engine.js     # Sampling, time formatting, keyframe helpers
+│   ├── export-service.js      # MediaRecorder video export
+│   ├── storage.js             # The only module touching localStorage
+│   ├── model.js               # Demo project, keyframe sampling, version 1 validation
 │   ├── history.js             # Bounded undo/redo project snapshots
 │   ├── spatial.js             # Walk cycle, door geometry, wall-crossing checks
 │   └── style.css              # Responsive application styling
@@ -291,10 +361,15 @@ The current entry point still owns substantial UI and editor orchestration. The 
 │   ├── spatial.test.js        # Walking, doors, crossing detection
 │   ├── browser-smoke.mjs      # Core browser and video smoke test
 │   ├── editor-regression.mjs  # Lock, hide, transform, history regressions
-│   └── walk-doors-delete.mjs  # Walk, door, delete, empty-camera coverage
+│   ├── walk-doors-delete.mjs  # Walk, door, delete, empty-camera coverage
+│   ├── migration-browser.mjs  # Version 1 → 2 migration in a real browser
+│   ├── repository-browser.mjs # Autosave, recovery, multi-tab, 100 edit/save cycles
+│   └── dashboard-browser.mjs  # Dashboard, scenes, trash, package import/export
 ├── docs/
 │   ├── PRD.md                 # Product requirements and release scope
-│   └── AUDIT.md               # Current behavior, evidence, and risks
+│   ├── DATA-MODEL.md          # Schema v2 contract, storage, trash, package format
+│   ├── AUDIT.md               # Current behavior, evidence, and risks
+│   └── handoff/               # Per-phase implementation reports
 ├── plan.md                    # Phased implementation plan derived from the PRD
 ├── package.json
 └── vite.config.js
@@ -332,7 +407,7 @@ Terminal 2:
 npm run test:browser
 ```
 
-Browser tests write screenshots, JSON fixtures, and test videos to `artifacts/`, which is ignored by Git. They cover the main Three.js workflow, keyframes, camera preview, lock/hide safety, direct viewport manipulation, undo/redo grouping, project round-trips, procedural walking, real doorway geometry, deletion, empty-camera recovery, responsive overflow, and video download.
+Browser tests write screenshots, JSON fixtures, and test videos to `artifacts/`, which is ignored by Git. They cover the main Three.js workflow, keyframes, camera preview, lock/hide safety, direct viewport manipulation, undo/redo grouping, project round-trips, procedural walking, real doorway geometry, deletion, empty-camera recovery, responsive overflow, video download, version 1 migration, atomic autosave and recovery snapshots, multi-tab isolation, and the dashboard journey (create, add scene, switch project, reload, duplicate, trash restore, package round-trip, legacy import, 44 px touch targets, 390 px layout).
 
 Tested locally during prototype development with Node.js 22 and stable Chrome on macOS. Passing these tests does not yet certify every browser, mobile interaction, accessibility target, or GPU configuration.
 

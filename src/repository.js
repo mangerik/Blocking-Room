@@ -6,10 +6,10 @@
 // ditulis. Status "tersimpan" hanya boleh ditampilkan setelah `tx.oncomplete`.
 //
 // Object store:
-//   projects   {id, title, createdAt, updatedAt, sceneCount, thumbnailRef, deletedAt, revisionToken}
+//   projects   {id, title, createdAt, updatedAt, lastOpenedAt, sceneCount, thumbnailRef, deletedAt, revisionToken}
 //   documents  dokumen v2 penuh (keyPath `id`)
 //   revisions  {id, projectId, parentId, createdAt, schemaVersion, title, byteSize, snapshot}
-//   assets     {id, projectId, contentHash, mimeType, byteSize, blob}
+//   assets     {id, projectId, sceneId, kind, contentHash, mimeType, byteSize, dataUrl}
 //   session    SessionState (keyPath `projectId`)
 //
 // Semua API mengembalikan Promise. Tidak ada dependency baru: wrapper Promise
@@ -22,6 +22,8 @@ export const DB_VERSION = 1;
 export const MIN_REVISIONS = 10;
 /** Batas simpan: selalu ≥ MIN_REVISIONS, kelebihan tertua dipangkas saat save. */
 export const REVISION_LIMIT = 20;
+/** Retensi trash (F3-03). Pembersihan dijalankan saat dashboard dibuka. */
+export const TRASH_RETENTION_DAYS = 30;
 
 const OPEN_TIMEOUT_MS = 10000;
 
@@ -180,6 +182,7 @@ export class ProjectRepository {
         sceneCount: countScenes(stored),
         thumbnailRef: thumbnailRef !== undefined ? thumbnailRef : (existing?.thumbnailRef ?? stored.thumbnailRef ?? null),
         deletedAt: existing?.deletedAt ?? null,
+        lastOpenedAt: existing?.lastOpenedAt ?? null,
         revisionToken,
       };
       this.metaCache.set(stored.id, meta);
@@ -223,6 +226,7 @@ export class ProjectRepository {
         sceneCount: countScenes(stored),
         thumbnailRef: cached?.thumbnailRef ?? stored.thumbnailRef ?? null,
         deletedAt: cached?.deletedAt ?? null,
+        lastOpenedAt: cached?.lastOpenedAt ?? null,
         revisionToken: Math.max(revisionToken, Number(cached?.revisionToken ?? 0)),
       });
       return {updatedAt: stored.updatedAt, revisionToken, revisionId: null, skipped: false};
@@ -267,6 +271,95 @@ export class ProjectRepository {
       for (const key of keys) await req(stores.revisions.delete(key));
       return true;
     });
+  }
+
+  /**
+   * Mengembalikan proyek dari trash (F3-03). `deletedAt` dikosongkan; isi dokumen
+   * dan revisi tidak pernah disentuh oleh delete non-permanen, jadi restore utuh.
+   */
+  restoreProject(id) {
+    return this.transaction('projects', 'readwrite', async stores => {
+      const meta = await req(stores.projects.get(id));
+      if (!meta) return false;
+      await req(stores.projects.put({...meta, deletedAt: null}));
+      this.metaCache.set(id, {...meta, deletedAt: null});
+      return true;
+    });
+  }
+
+  /**
+   * Membersihkan item trash yang sudah melewati `days` hari (F3-03).
+   * Dijalankan saat dashboard dibuka — aplikasi lokal tidak punya proses latar.
+   * @returns {Promise<string[]>} id proyek yang dihapus permanen
+   */
+  async purgeExpiredTrash({days = TRASH_RETENTION_DAYS, now = Date.now()} = {}) {
+    const limit = now - days * 24 * 60 * 60 * 1000;
+    const rows = await this.listProjects({includeDeleted: true});
+    const expired = rows.filter(p => p.deletedAt && Date.parse(p.deletedAt) <= limit);
+    for (const project of expired) await this.deleteProject(project.id, {permanent: true});
+    return expired.map(p => p.id);
+  }
+
+  /** Menandai proyek terakhir dibuka (urutan "terakhir dibuka" di dashboard). */
+  touchProject(id, stamp = this.now()) {
+    return this.transaction('projects', 'readwrite', async stores => {
+      const meta = await req(stores.projects.get(id));
+      if (!meta) return null;
+      const next = {...meta, lastOpenedAt: stamp};
+      await req(stores.projects.put(next));
+      this.metaCache.set(id, next);
+      return next;
+    });
+  }
+
+  /**
+   * Mengganti judul proyek dari dashboard: metadata dan dokumen diperbarui dalam
+   * SATU transaksi supaya kartu dashboard tidak pernah menampilkan judul yang tidak
+   * ada di dokumen. Token dinaikkan agar autosave tab lain tidak menimpanya diam-diam.
+   */
+  renameProject(id, title) {
+    return this.transaction(['projects', 'documents'], 'readwrite', async stores => {
+      const meta = await req(stores.projects.get(id));
+      const doc = await req(stores.documents.get(id));
+      if (!meta || !doc) return null;
+      const updatedAt = this.now();
+      const revisionToken = Math.max(Number(meta.revisionToken ?? 0) + 1, Date.now());
+      const nextMeta = {...meta, title, updatedAt, revisionToken};
+      await req(stores.documents.put({...doc, title, updatedAt}));
+      await req(stores.projects.put(nextMeta));
+      this.metaCache.set(id, nextMeta);
+      return nextMeta;
+    });
+  }
+
+  /**
+   * Menyimpan thumbnail (F3-06) di store `assets` dan menunjuknya dari metadata
+   * proyek. Sengaja TIDAK menyentuh store `documents`: kegagalan thumbnail tidak
+   * boleh menggagalkan penyimpanan dokumen, dan gambar tidak membuat langkah undo.
+   */
+  putThumbnail(projectId, asset, {setProjectThumbnail = true} = {}) {
+    return this.transaction(['assets', 'projects'], 'readwrite', async stores => {
+      const record = {
+        id: asset.id, projectId, sceneId: asset.sceneId ?? null, kind: 'thumbnail',
+        contentHash: asset.contentHash ?? null, mimeType: asset.mimeType ?? 'image/jpeg',
+        byteSize: asset.byteSize ?? (asset.dataUrl?.length ?? 0), dataUrl: asset.dataUrl,
+        createdAt: this.now(),
+      };
+      await req(stores.assets.put(record));
+      if (setProjectThumbnail) {
+        const meta = await req(stores.projects.get(projectId));
+        if (meta && meta.thumbnailRef !== asset.id) {
+          const next = {...meta, thumbnailRef: asset.id};
+          await req(stores.projects.put(next));
+          this.metaCache.set(projectId, next);
+        }
+      }
+      return record.id;
+    });
+  }
+
+  deleteAsset(id) {
+    return this.transaction('assets', 'readwrite', s => req(s.assets.delete(id)));
   }
 
   // ---------- revisi ----------

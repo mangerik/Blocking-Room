@@ -24,8 +24,8 @@ Dokumen ini adalah kontrak yang dipakai `src/schema.js` (validator), `src/migrat
 | `createdAt` | ISO-8601 UTC | ya | Ditulis sekali saat proyek dibuat atau dimigrasikan. |
 | `updatedAt` | ISO-8601 UTC | ya | Distempel **saat menyimpan** (`src/storage.js`), bukan saat mengedit, agar snapshot history tidak berubah hanya karena waktu. |
 | `activeSceneId` | ID scene | ya | Scene aktif; wajib menunjuk scene di dalam proyek ini. Ikut dipulihkan saat undo. |
-| `thumbnailRef` | string \| null | ya | Referensi thumbnail (Fase 3). R1 selalu `null`. |
-| `assets` | Asset[] | ya | Kosong pada R1; aset dibangun pada Fase 3. |
+| `thumbnailRef` | string \| null | ya | Referensi thumbnail. **Sejak Fase 3 field dokumen ini tetap `null`**: thumbnail hidup di store `assets` dan ditunjuk oleh metadata proyek, bukan oleh dokumen (lihat §2 Asset). |
+| `assets` | Asset[] | ya | Tetap kosong pada R1. Aset (thumbnail) disimpan di store `assets` repository, bukan di dalam dokumen, supaya kegagalan gambar tidak dapat menggagalkan penyimpanan dokumen. |
 | `scenes` | Scene[] | ya | Minimal 1, maksimal 200. |
 
 ### Scene
@@ -36,7 +36,8 @@ Dokumen ini adalah kontrak yang dipakai `src/schema.js` (validator), `src/migrat
 | `projectId` | ID proyek | ya | **Harus** sama dengan `project.id`; berbeda → ditolak sebagai referensi lintas proyek. |
 | `name` | string 1–100 | ya | Nama scene. |
 | `order` | integer ≥ 0 | ya | Urutan tampil. |
-| `notes` | string ≤ 2000 | ya | Director’s note milik scene. |
+| `notes` | string ≤ 2000 | ya | Director’s note milik scene; editable di panel kiri editor (F3-05). |
+| `thumbnailRef` | string \| null | tidak | Diisi `null` oleh operasi scene Fase 3. Thumbnail scene sesungguhnya dicari di store `assets` dengan id `thumb-<sceneId>`. |
 | `activeShotId` | ID shot | ya | Shot aktif di scene ini. |
 | `actors` | Object(actor)[] | ya | **Identitas aktor milik scene**; maksimal 50. |
 | `setObjects` | Object(room)[] | ya | Set/lokasi milik scene; maksimal 30. |
@@ -106,7 +107,7 @@ Dokumen ini adalah kontrak yang dipakai `src/schema.js` (validator), `src/migrat
 
 Semuanya milik repository, **bukan** bagian dari dokumen:
 
-- `Asset { id, projectId, contentHash, mimeType, byteSize, blobRef }` — store `assets` sudah ada, pengisiannya Fase 3.
+- `Asset { id, projectId, sceneId, kind, contentHash, mimeType, byteSize, dataUrl, createdAt }` — store `assets`. Fase 3 mengisinya dengan **thumbnail** (`kind: 'thumbnail'`, JPEG 320×180 sebagai data URL, id `thumb-<sceneId>`). Thumbnail ditulis lewat `repository.putThumbnail()` dalam transaksi `assets` + `projects` yang **tidak menyentuh store `documents`**: kegagalan thumbnail tidak dapat menggagalkan penyimpanan dokumen dan tidak pernah membuat langkah undo. `projects.thumbnailRef` menunjuk thumbnail scene yang terakhir dirender; aset yang hilang ditampilkan dashboard sebagai placeholder, bukan error.
 - `Revision { id, projectId, parentId, createdAt, schemaVersion, title, snapshot }` — snapshot recovery, **berbeda** dari undo sesi. Store `revisions`, index `projectId_createdAt`; minimal 10 revisi per proyek dipertahankan, batas simpan 20 dan kelebihan tertua dipangkas dalam transaksi save yang sama (Fase 2, F2-05).
 - `ExportJob { id, projectId, revisionId, shotIds[], settings, status, outputRef? }` — merender dari revision immutable (Fase 5, belum ada store).
 - `SessionState { projectId, sceneId, shotId, selectedId, playhead, observerPose, activeTool }` — **UI state**, store `session` (keyPath `projectId`), throttle 1 detik, tidak pernah masuk undo (Fase 2, F2-06). `observerPose = { x, y, z, targetX, targetY, targetZ }`.
@@ -124,9 +125,69 @@ localStorage (`src/storage.js`) hanya menyimpan hal kecil yang harus dibaca sink
 | `blocking-room` | Dokumen lama (v1/v2) sebagai sumber migrasi. **Tidak pernah ditimpa** oleh hasil migrasi. |
 | `blocking-room.backup` | Salinan mentah sumber sebelum migrasi (copy-first). |
 | `blocking-room.migrated` | Id proyek hasil migrasi; ditulis hanya setelah transaksi commit sehingga migrasi ulang tidak membuat duplikat. |
-| `blocking-room.activeProject` | Proyek yang dibuka editor (sementara, sampai dashboard Fase 3). |
+| `blocking-room.activeProject` | Proyek yang dibuka editor. **Tetap sumber kebenaran sejak Fase 3**: rute hash `#/project/<id>` hanya menuliskannya sebelum editor dimuat. |
 | `blocking-room.pending` | Titipan sinkron saat tab ditutup: transaksi IndexedDB yang baru dimulai pada `pagehide` tidak dijamin commit. Diambil dan dibuang oleh bootstrap berikutnya. |
 | `blocking-room.writer.<projectId>` | Heartbeat writer untuk fallback kunci antartab. |
+
+### Metadata proyek (store `projects`, Fase 3)
+
+Dashboard hanya membaca store ini; membuka daftar 100 proyek tidak pernah memuat satu
+dokumen pun.
+
+| Field | Isi |
+|---|---|
+| `id`, `title`, `createdAt`, `updatedAt` | Cerminan dokumen; `title` dan `updatedAt` selalu ditulis dalam transaksi yang sama dengan dokumen. |
+| `sceneCount` | Jumlah scene, untuk kartu dashboard. |
+| `thumbnailRef` | Id aset thumbnail atau `null`. |
+| `lastOpenedAt` | ISO-8601 saat proyek terakhir dibuka dari dashboard/editor (`repository.touchProject`). Dipakai urutan “terakhir dibuka”; dipertahankan oleh setiap penyimpanan berikutnya. |
+| `deletedAt` | `null` atau ISO-8601 saat proyek dipindahkan ke tempat sampah. |
+| `revisionToken` | Token monoton terakhir yang menang; menolak respons save yang datang terlambat. |
+
+### Tempat sampah 30 hari (F3-03)
+
+- `repository.deleteProject(id)` **hanya** mengisi `deletedAt`. Dokumen, revisi dan session
+  state tidak disentuh, sehingga `restoreProject(id)` mengembalikan isi apa adanya.
+- `repository.deleteProject(id, {permanent: true})` menghapus metadata, dokumen, session
+  state dan seluruh revisi proyek dalam satu transaksi. UI menuntut konfirmasi eksplisit
+  (klik kedua pada tombol konfirmasi), bukan hanya satu klik.
+- **Kapan pembersihan otomatis berjalan:** aplikasi lokal tidak punya proses latar, jadi
+  `repository.purgeExpiredTrash()` dijalankan **setiap kali dashboard dibuka**
+  (`src/dashboard.js`, fungsi `load()`). Item dengan `deletedAt` lebih tua dari
+  `TRASH_RETENTION_DAYS` (30 hari) dihapus permanen, dan pengguna diberi tahu berapa item
+  yang dibersihkan. Proyek yang tidak pernah membuka dashboard tidak akan pernah
+  kehilangan isi tempat sampahnya — itu disengaja: penghapusan permanen hanya terjadi
+  pada sesi yang benar-benar melihat daftar proyek.
+
+### Paket proyek `.blockingroom.json` (F3-07)
+
+Format ekspor/impor satu berkas. JSON, bukan ZIP: ZIP menuntut library kompresi dan proyek
+ini tidak menambah dependency.
+
+```jsonc
+{
+  "manifest": {
+    "format": "blockingroom.package", "packageVersion": 1, "schemaVersion": 2,
+    "app": {"name": "blocking-room", "version": "1.0.0"},
+    "createdAt": "ISO-8601",
+    "counts": {"scenes": 2, "assets": 0},
+    "checksums": {"project": "sha256 hex", "scenes": "…", "assets": "…"}
+  },
+  "project": { /* dokumen tanpa `scenes` */ },
+  "scenes":  [ /* Scene[] */ ],
+  "assets":  [ /* {id, sceneId, kind, mimeType, byteSize, dataUrl} — boleh kosong */ ]
+}
+```
+
+- Checksum SHA-256 dihitung `crypto.subtle` atas JSON kanonik **tiap bagian**; ketiganya
+  diperiksa sebelum dokumen digabung dan divalidasi, jadi paket rusak ditolak **sebelum**
+  state aktif tersentuh.
+- Paket tanpa aset tetap valid (`assets: []` punya checksum sendiri).
+- Batas ukuran `MAX_PACKAGE_BYTES` = 8 MB, diperiksa sebelum parsing lanjutan.
+- `packageVersion` lebih baru ditolak; `schemaVersion` lebih baru melempar
+  `SchemaTooNewError` dan tidak pernah menimpa apa pun.
+- Impor selalu menjadi **proyek baru**. Bila ID sudah dipakai, seluruh ID internal
+  dipetakan ulang (`cloneProjectDocument`) dan judul diberi sufiks; bila ID bebas, ID
+  dipertahankan sehingga roundtrip ekspor→impor menghasilkan dokumen identik.
 
 ## 3. Invariant yang dijaga validator
 

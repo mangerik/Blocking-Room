@@ -1,12 +1,13 @@
-import { createIcons, Box, FolderOpen, Download, Film, Layers, Plus, CircleHelp, Scan, MousePointer2, Move, Route, Focus, SlidersHorizontal, Video, SkipBack, Play, Pause, Circle, PersonStanding, Cuboid, Eye, Diamond, Minus, Trash2, Undo2, Redo2, LockKeyhole, LockKeyholeOpen, EyeOff, RotateCw, History, LifeBuoy } from 'lucide';
-const icons={Box,FolderOpen,Download,Film,Layers,Plus,CircleHelp,Scan,MousePointer2,Move,Route,Focus,SlidersHorizontal,Video,SkipBack,Play,Pause,Circle,PersonStanding,Cuboid,Eye,Diamond,Minus,Trash2,Undo2,Redo2,LockKeyhole,LockKeyholeOpen,EyeOff,RotateCw,History,LifeBuoy};
+import { createIcons, Box, FolderOpen, Download, Film, Layers, Plus, CircleHelp, Scan, MousePointer2, Move, Route, Focus, SlidersHorizontal, Video, SkipBack, Play, Pause, Circle, PersonStanding, Cuboid, Eye, Diamond, Minus, Trash2, Undo2, Redo2, LockKeyhole, LockKeyholeOpen, EyeOff, RotateCw, History, LifeBuoy, ArrowLeft, ChevronUp, ChevronDown, Copy, PencilLine, Clapperboard } from 'lucide';
+const icons={Box,FolderOpen,Download,Film,Layers,Plus,CircleHelp,Scan,MousePointer2,Move,Route,Focus,SlidersHorizontal,Video,SkipBack,Play,Pause,Circle,PersonStanding,Cuboid,Eye,Diamond,Minus,Trash2,Undo2,Redo2,LockKeyhole,LockKeyholeOpen,EyeOff,RotateCw,History,LifeBuoy,ArrowLeft,ChevronUp,ChevronDown,Copy,PencilLine,Clapperboard};
 import { initialProject, palette, sample, putKey } from './model.js';
 import { validDoors, wallCrossings } from './spatial.js';
-import { DocumentStore, cloneProjectDocument } from './document.js';
+import { DocumentStore, cloneProjectDocument, addScene, duplicateScene, moveScene, removeScene, renameScene } from './document.js';
 import { EditorSession, ReadOnlyError, partitionByLock, describeSkipped } from './commands.js';
 import { openProjectData } from './migrate.js';
 import { SchemaTooNewError } from './schema.js';
 import { clearPendingDocument, setActiveProjectId, writePendingDocument } from './storage.js';
+import { DASHBOARD_ROUTE, projectRoute } from './routing.js';
 import { bootstrap } from './bootstrap.js';
 import { AutosaveController, SAVE_STATUS } from './autosave.js';
 import { SessionTracker, restoreSession } from './session-state.js';
@@ -30,16 +31,18 @@ const sessionTracker=new SessionTracker({repository});
 autosave.setEnabled(!!repository&&!storageBlocked&&!session.readOnly);
 sessionTracker.setEnabled(!!repository&&!session.readOnly);
 const restored=restoreSession(store.doc,stored.sessionState);
+// F3-04/PR-05: scene aktif dipulihkan dari SessionState (fallback aman bila scene hilang).
+if(restored.sceneId!==store.sceneId){try{store.activate(restored.sceneId,restored.shotId);}catch{/* scene tersimpan sudah tidak ada */}}
 let project=store.view;
 // UI state: tidak pernah masuk history dan tidak pernah disimpan ke dokumen.
 let tab='actors',selected=project.actors[0]?.id||'camera',time=0,playing=false,mode='orbit',view='perspective',walls=true,paths=true,exporting=false,recording=false;
 let toastTimer,recordPose=null,recordFrom=0;
 $('#app').innerHTML=`
-<header><div class="header-left"><div class="brand"><div class="brand-mark">${icon('box')}</div><div>blocking room<small>A SPACE FOR YOUR NEXT SCENE</small></div></div><div class="header-divider"></div><div class="breadcrumb">Workspace <span style="margin:0 9px">/</span> <b>Scene studio</b></div></div><div class="header-actions"><button class="icon" id="undo" title="Undo (⌘/Ctrl Z)" aria-label="Undo" disabled>${icon('undo-2')}</button><button class="icon" id="redo" title="Redo (⌘/Ctrl Shift Z)" aria-label="Redo" disabled>${icon('redo-2')}</button><span class="saved" id="save-status" data-state="idle">Menyiapkan…</span><button class="icon" id="download-backup" title="Unduh cadangan JSON" aria-label="Unduh cadangan JSON" hidden>${icon('life-buoy')}</button><button class="icon" id="revisions" title="Riwayat versi tersimpan" aria-label="Riwayat versi tersimpan">${icon('history')}</button><button id="import">${icon('folder-open')}<span class="button-text">Buka</span></button><button id="save">${icon('download')}<span class="button-text">Simpan proyek</span></button><button class="primary" id="export">${icon('film')}<span>Ekspor video</span></button></div></header>
-<div class="project-bar"><div><div class="eyebrow">SCENE 01 <span style="margin:0 7px;color:#b0b5a7">/</span> INTERIOR · DAY</div><div class="title-line"><input class="project-title-input" aria-label="Judul proyek" id="project-title" maxlength="100" value="${esc(project.title)}"/><span class="badge">PRE-VISUALIZATION</span></div></div><div class="steps"><span class="current"><i>1</i> Tata scene</span><span>—</span><span><i>2</i> Atur gerakan</span><span>—</span><span><i>3</i> Jadikan referensi</span></div></div>
-<main class="studio"><aside class="left-panel"><div class="panel-heading">Scene explorer ${icon('layers')}</div><nav class="tabs" aria-label="Jenis objek"><button data-tab="actors" class="active">Karakter</button><button data-tab="rooms">Lokasi</button><button data-tab="camera">Kamera</button></nav><div class="section-caption"><span id="list-caption">KARAKTER DALAM SCENE</span><span id="object-count"></span></div><div class="object-list" id="objects"></div><button class="add-object" id="add-object">${icon('plus')} Tambah karakter</button><div class="left-bottom"><div class="eyebrow">DIRECTOR’S NOTE</div><p class="scene-note">Dua karakter bertemu di galeri. Kamera mengikuti langkah Alex dari foyer menuju ruang utama.</p><div class="legend-row"><i></i><span id="scene-count"></span></div><button class="ghost small" id="help" style="margin:14px 0 0 -7px">${icon('circle-help')} Panduan singkat</button></div></aside>
+<header><div class="header-left"><div class="brand"><div class="brand-mark">${icon('box')}</div><div>blocking room<small>A SPACE FOR YOUR NEXT SCENE</small></div></div><div class="header-divider"></div><nav class="breadcrumb" id="breadcrumb" aria-label="Lokasi proyek"><button class="crumb-link" id="crumb-dashboard">Semua proyek</button><span class="crumb-sep">/</span><b id="crumb-project"></b><span class="crumb-sep">/</span><span id="crumb-scene"></span><span class="crumb-sep">/</span><span id="crumb-shot"></span></nav></div><div class="header-actions"><button class="icon" id="back-dashboard" title="Kembali ke daftar proyek" aria-label="Kembali ke daftar proyek">${icon('arrow-left')}</button><button class="icon" id="undo" title="Undo (⌘/Ctrl Z)" aria-label="Undo" disabled>${icon('undo-2')}</button><button class="icon" id="redo" title="Redo (⌘/Ctrl Shift Z)" aria-label="Redo" disabled>${icon('redo-2')}</button><span class="saved" id="save-status" data-state="idle">Menyiapkan…</span><button class="icon" id="download-backup" title="Unduh cadangan JSON" aria-label="Unduh cadangan JSON" hidden>${icon('life-buoy')}</button><button class="icon" id="revisions" title="Riwayat versi tersimpan" aria-label="Riwayat versi tersimpan">${icon('history')}</button><button id="import">${icon('folder-open')}<span class="button-text">Buka</span></button><button id="save">${icon('download')}<span class="button-text">Simpan proyek</span></button><button class="primary" id="export">${icon('film')}<span>Ekspor video</span></button></div></header>
+<div class="project-bar"><div><div class="eyebrow" id="scene-eyebrow"></div><div class="title-line"><input class="project-title-input" aria-label="Judul proyek" id="project-title" maxlength="100" value="${esc(project.title)}"/><span class="badge">PRE-VISUALIZATION</span></div></div><div class="steps"><span class="current"><i>1</i> Tata scene</span><span>—</span><span><i>2</i> Atur gerakan</span><span>—</span><span><i>3</i> Jadikan referensi</span></div></div>
+<main class="studio"><aside class="left-panel"><div class="panel-heading">Scene explorer ${icon('layers')}</div><div class="section-caption"><span>SCENE DALAM PROYEK</span><span id="scene-total"></span></div><div class="scene-list" id="scene-list"></div><div class="scene-actions" id="scene-actions" aria-label="Aksi scene aktif"></div><button class="add-object" id="add-scene" aria-label="Tambah scene baru">${icon('plus')} Tambah scene</button><div class="panel-split"></div><nav class="tabs" aria-label="Jenis objek"><button data-tab="actors" class="active">Karakter</button><button data-tab="rooms">Lokasi</button><button data-tab="camera">Kamera</button></nav><div class="section-caption"><span id="list-caption">KARAKTER DALAM SCENE</span><span id="object-count"></span></div><div class="object-list" id="objects"></div><button class="add-object" id="add-object" aria-label="Tambah objek ke scene">${icon('plus')} Tambah karakter</button><div class="left-bottom"><div class="eyebrow">DIRECTOR’S NOTE</div><textarea class="scene-note" id="scene-notes" rows="3" maxlength="2000" aria-label="Director’s note scene ini" placeholder="Catatan pengarahan untuk scene ini…"></textarea><div class="legend-row"><i></i><span id="scene-count"></span></div><button class="ghost small" id="help" style="margin:14px 0 0 -7px">${icon('circle-help')} Panduan singkat</button></div></aside>
 <section class="workarea" aria-label="Editor scene 3D"><div class="view-toolbar"><span class="view-title">${icon('box')} OBSERVER VIEW</span><div class="view-options"><button class="ghost active" data-view="perspective">Perspektif</button><button class="ghost" data-view="top">Atas</button><button class="ghost" data-view="camera">Kamera / final</button><button class="ghost" id="toggle-walls" title="Dinding transparan">${icon('scan')}<span>Dinding</span></button></div></div><div class="viewport" id="viewport"><div class="scene-labels" id="labels"></div></div><div class="tools-vertical"><button class="active" id="orbit-tool" title="Orbit scene (O)">${icon('mouse-pointer-2')}</button><button id="move-tool" title="Geser objek di lantai (G)">${icon('move')}</button><button id="rotate-tool" title="Putar karakter (R) — drag kiri/kanan">${icon('rotate-cw')}</button><button id="paths-tool" class="active" title="Tampilkan jalur gerakan">${icon('route')}</button><button id="reset-view" title="Reset sudut pandang">${icon('focus')}</button></div><div class="viewport-hint"><kbd>Drag</kbd> Putar tampilan <span>·</span> <kbd>Scroll</kbd> Zoom <span>·</span> <kbd>G</kbd> Geser objek</div><div class="path-warning" id="path-warning" role="status" hidden></div><div class="compass">↗</div><div class="help-panel" hidden><h3>Dari blocking ke film.</h3><p><b>1. Tata scene.</b> Tambah karakter dan ruangan. Pilih objek lalu ubah posisinya di panel kanan.</p><p><b>2. Buat gerakan.</b> Geser playhead ke waktu tujuan, pindahkan objek dengan tool G atau input posisi. Keyframe tersimpan otomatis.</p><p><b>3. Preview & ekspor.</b> Tekan Space untuk memutar. Ekspor merekam sudut pandang Kamera A.</p><p><b>Rotasi:</b> R lalu drag karakter ke kiri/kanan, atau Q/E untuk putar 5°. Panah menggeser tanpa mengubah arah hadap. Semua bekerja di Kamera / final.</p><p><b>Lock & hide:</b> gunakan gembok dan mata di daftar objek. Lokasi terkunci secara default. Item tersembunyi juga tidak tampil di video; kamera hanya menyembunyikan penandanya.</p><p><b>Undo/redo:</b> ⌘/Ctrl Z dan ⌘/Ctrl Shift Z. Satu drag atau rekaman = satu langkah.</p><p><b>Rekam gerak:</b> aktifkan tombol rekam, lalu gunakan panah untuk bergerak dan Q/E untuk berputar.</p><button class="small" id="close-help">Mengerti</button></div><div class="export-progress" hidden><span id="export-label">Merekam video…</span><progress id="export-meter" max="100" value="0"></progress><button class="small ghost" id="cancel-export">Batalkan</button></div></section>
-<aside class="right-panel"><div class="panel-heading">Camera & properties ${icon('sliders-horizontal')}</div><div class="camera-section"><div class="camera-title"><span>${icon('video')} Kamera A</span><span class="live-dot">LIVE PREVIEW</span></div><div class="camera-frame" id="camera-preview"><div class="frame-guide"></div><div id="no-camera" hidden>Belum ada kamera<br><small>Tambah kamera melalui Scene explorer.</small></div><button class="preview-edit" id="edit-camera-view" title="Edit karakter pada sudut pandang kamera">Edit final view ↗</button></div><div class="camera-meta"><span id="lens-label">35 mm · Perspective</span><span>16:9 · 720p</span></div></div><div class="inspector-title"><span id="inspector-name">Properti karakter</span><span class="eyebrow" id="inspector-kind">ACTOR</span></div><div class="inspector" id="inspector"></div></aside>
+<aside class="right-panel"><div class="panel-heading">Camera & properties ${icon('sliders-horizontal')}</div><div class="camera-section"><div class="camera-title"><span>${icon('video')} <b id="camera-name-label">Kamera A</b></span><span class="live-dot">LIVE PREVIEW</span></div><div class="camera-frame" id="camera-preview"><div class="frame-guide"></div><div id="no-camera" hidden>Belum ada kamera<br><small>Tambah kamera melalui Scene explorer.</small></div><button class="preview-edit" id="edit-camera-view" title="Edit karakter pada sudut pandang kamera">Edit final view ↗</button></div><div class="camera-meta"><span id="lens-label">35 mm · Perspective</span><span>16:9 · 720p</span></div></div><div class="inspector-title"><span id="inspector-name">Properti karakter</span><span class="eyebrow" id="inspector-kind">ACTOR</span></div><div class="inspector" id="inspector"></div></aside>
 <section class="timeline" aria-label="Timeline gerakan"><div class="timeline-head"><div class="transport"><button class="ghost icon small" id="rewind" title="Kembali ke awal">${icon('skip-back')}</button><button class="play" id="play" title="Putar / jeda (Space)">${icon('play')}</button><button class="ghost icon small" id="record" title="Rekam gerakan karakter dengan tombol panah">${icon('circle')}</button><div class="timecode"><b id="time-display">00:00.0</b> <span id="total-display">/ 00:12</span></div></div><div class="duration"><span>Durasi</span><input id="duration" type="number" min="1" max="120" value="${project.duration}" aria-label="Durasi scene"/><span>dtk</span></div></div><div class="timeline-body" id="timeline-body"><div class="ruler" id="ruler"></div><input class="scrub" type="range" min="0" max="${project.duration}" step="0.1" value="0" aria-label="Waktu timeline" id="scrub"/><div id="tracks"></div><div class="playhead" id="playhead"></div></div></section></main><div class="toast" role="status" id="toast"></div>
 <div class="tab-banner" id="tab-banner" role="alert" hidden><span id="tab-banner-text"></span><span class="tab-banner-actions"><button class="small" id="open-copy">Buka salinan</button><button class="small" id="take-over">Ambil alih</button></span></div>
 <div class="revision-dialog" id="revision-panel" role="dialog" aria-label="Riwayat versi tersimpan" hidden><div class="revision-head"><b>Riwayat versi</b><button class="ghost small" id="close-revisions">Tutup</button></div><div class="revision-list" id="revision-list"></div><button class="small" id="open-last-saved">Buka versi tersimpan terakhir</button><p class="hint">Snapshot dibuat otomatis saat menyimpan. Memulihkan versi menjadi satu langkah undo yang dapat dibatalkan.</p></div>
@@ -86,7 +89,7 @@ function persist(track=true){
     try{session.commit();}
     catch(err){project=store.load(session.lastValidDocument());notify(err instanceof ReadOnlyError?err.message:`Perubahan ditolak: ${err.message}`);saveNow();updateHistoryUI();rebuild();return false;}
   }else store.flush();
-  saveNow();updateHistoryUI();return true;
+  saveNow();scheduleThumbnail();updateHistoryUI();return true;
 }
 function updateHistoryUI(){
   $('#undo').disabled=exporting||recording||session.readOnly||!session.canUndo;
@@ -117,7 +120,7 @@ function kind(){return project.actors.some(a=>a.id===selected)?'actors':project.
 function renderList(){
  const items=tab==='camera'?(project.camera?[project.camera]:[]):project[tab];
  $('#objects').innerHTML=items.map(o=>`<div class="object-row ${selected===o.id?'selected':''} ${o.visible===false?'is-hidden':''}"><button class="object" data-select="${esc(o.id)}"><span class="swatch" style="--c:${o.color||'#65775d'}">${icon(tab==='actors'?'person-standing':tab==='rooms'?'cuboid':'video')}</span><span><strong>${esc(o.name)}</strong><small>${tab==='actors'?`${o.height.toFixed(2)} m · ${o.keys.length} keyframe`:tab==='rooms'?`${o.w} × ${o.d} m`:`${o.focal} mm · ${o.keys.length} keyframe`}</small></span></button><div class="object-actions"><button class="ghost icon ${o.locked?'locked':''}" data-lock="${esc(o.id)}" aria-label="${o.locked?'Buka kunci':'Kunci'} ${esc(o.name)}" title="${o.locked?'Buka kunci':'Kunci'} ${esc(o.name)}" aria-pressed="${!!o.locked}">${icon(o.locked?'lock-keyhole':'lock-keyhole-open')}</button><button class="ghost icon" data-visible="${esc(o.id)}" aria-label="${o.visible===false?'Tampilkan':'Sembunyikan'} ${esc(o.name)}" title="${tab==='camera'?'Tampilkan/sembunyikan penanda kamera':o.visible===false?'Tampilkan di scene dan video':'Sembunyikan dari scene dan video'}" aria-pressed="${o.visible!==false}">${icon(o.visible===false?'eye-off':'eye')}</button><button class="ghost icon" data-delete="${esc(o.id)}" title="Hapus ${esc(o.name)}" aria-label="Hapus ${esc(o.name)}" ${o.locked?'disabled':''}>${icon('trash-2')}</button></div></div>`).join('');
- $('#object-count').textContent=String(items.length).padStart(2,'0');$('#list-caption').textContent={actors:'KARAKTER DALAM SCENE',rooms:'ZONA & RUANGAN',camera:'SCENE CAMERA'}[tab];$('#add-object').hidden=tab==='camera'&&!!project.camera;$('#add-object').innerHTML=icon('plus')+(tab==='actors'?' Tambah karakter':tab==='camera'?' Tambah kamera':' Tambah ruangan');$('#scene-count').textContent=`${project.rooms.length} lokasi · ${project.actors.length} karakter · ${project.camera?1:0} kamera`;
+ $('#object-count').textContent=String(items.length).padStart(2,'0');$('#list-caption').textContent={actors:'KARAKTER DALAM SCENE',rooms:'ZONA & RUANGAN',camera:'SCENE CAMERA'}[tab];$('#add-object').hidden=tab==='camera'&&!!project.camera;$('#add-object').innerHTML=icon('plus')+(tab==='actors'?' Tambah karakter':tab==='camera'?' Tambah kamera':' Tambah ruangan');$('#add-object').setAttribute('aria-label',tab==='actors'?'Tambah karakter':tab==='camera'?'Tambah kamera':'Tambah ruangan');$('#scene-count').textContent=`${project.rooms.length} lokasi · ${project.actors.length} karakter · ${project.camera?1:0} kamera`;
  document.querySelectorAll('[data-select]').forEach(b=>b.onclick=()=>select(b.dataset.select));
  for(const [attribute,property] of [['lock','locked'],['visible','visible']])document.querySelectorAll(`[data-${attribute}]`).forEach(b=>b.onclick=()=>{
    if(exporting||recording)return;pause();finishKeyboardGesture();const o=items.find(o=>o.id===b.dataset[attribute]);o[property]=!o[property];changed();
@@ -166,7 +169,7 @@ function syncCameraUI(){
  const collisions=project.actors.filter(a=>a.visible!==false).flatMap(a=>wallCrossings(a,project.rooms).map(c=>({...c,name:a.name})));
  $('#path-warning').hidden=!collisions.length;$('#path-warning').textContent=collisions.length?`Jalur ${collisions[0].name} melewati dinding pada ${collisions[0].t.toFixed(1)}s. Tambahkan pintu atau atur keyframe.`:'';
 }
-function rebuild(){syncCameraUI();buildScene();renderList();renderInspector();renderTimeline();}
+function rebuild(){syncCameraUI();buildScene();renderList();renderInspector();renderTimeline();renderScenes();renderBreadcrumb();}
 function changed(){persist();rebuild();}
 function select(id){if(exporting||recording)return;finishKeyboardGesture();selected=id;tab=kind();renderTabs();renderList();renderInspector();updateScene();}
 function renderTabs(){document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));}
@@ -234,7 +237,7 @@ $('#duration').onchange=e=>{if(exporting)return;const n=Number(e.target.value);i
    for(const o of tracked)if(!o.locked)o.keys=trimTrackToDuration(o.keys,n);
  }
  project.duration=n;time=Math.min(time,n);changed();};
-$('#project-title').onchange=e=>{if(recording)pause();project.title=e.target.value.trim()||'Scene tanpa judul';e.target.value=project.title;persist();};
+$('#project-title').onchange=e=>{if(recording)pause();project.title=e.target.value.trim()||'Scene tanpa judul';e.target.value=project.title;persist();renderBreadcrumb();};
 $('#undo').onclick=()=>restoreHistory('undo');$('#redo').onclick=()=>restoreHistory('redo');$('#rotate-tool').onclick=()=>setMode('rotate');$('#orbit-tool').onclick=()=>setMode('orbit');$('#move-tool').onclick=()=>setMode('move');$('#paths-tool').onclick=()=>{paths=!paths;renderer3d.paths=paths;renderer3d.pathsGroup.visible=paths;$('#paths-tool').classList.toggle('active',paths);};$('#toggle-walls').onclick=()=>{walls=!walls;renderer3d.walls=walls;$('#toggle-walls').classList.toggle('active',!walls);buildScene();};$('#reset-view').onclick=()=>resetView();document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{if(b.dataset.view==='camera'){if(!project.camera)return;setView('camera');setMode(mode==='orbit'?'move':mode);document.querySelectorAll('[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view));}else resetView(b.dataset.view==='top');});$('#edit-camera-view').onclick=()=>document.querySelector('[data-view="camera"]').click();
 $('#help').onclick=()=>$('.help-panel').hidden=!$('.help-panel').hidden;$('#close-help').onclick=()=>$('.help-panel').hidden=true;
 $('#save').onclick=()=>{if(recording)pause();download(new Blob([JSON.stringify(store.snapshot(),null,2)],{type:'application/json'}),`${project.title.replace(/[^a-z0-9 -]/gi,'')||'scene'}.json`);notify('Proyek diunduh. Buka kembali untuk melanjutkan.');};
@@ -257,6 +260,144 @@ function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last
   if(recording&&now-recordTick>95){recordTick=now;const recorded=objectData();recorded.keys=recorded.keys.filter(k=>k.t<=recordFrom||k.t>=Math.round(time*10)/10);const dx=(keysDown.has('arrowright')?1:0)-(keysDown.has('arrowleft')?1:0),dz=(keysDown.has('arrowdown')?1:0)-(keysDown.has('arrowup')?1:0);if(dx||dz)moveSelected(dx*.18,dz*.18);const turn=(keysDown.has('e')?1:0)-(keysDown.has('q')?1:0);if(turn)rotateSelected(turn*6);if(!dx&&!dz&&!turn){const o=objectData();if(editable(o))putKey(o.keys,recordPose,time);}recordFrom=Math.round(time*10)/10;}
   updateTimeUI();updateScene();if(time>=project.duration){if(exporting){playing=false;renderer3d.renderPOV(project);exportService.stop();}else pause();}}
  renderer3d.renderViewport(project);recordSession();}
+// ---------- F3-04/F3-05: banyak scene, breadcrumb, director's note ----------
+// Operasi scene memutasi dokumen (bukan scene view), jadi jalurnya sendiri:
+// tulis view aktif → mutasi dokumen → baca ulang view → validasi + satu langkah undo.
+// Bila mutasi menghasilkan dokumen tidak valid, dokumen kembali ke keadaan valid terakhir.
+let renamingScene=null;
+const sceneThumbs=new Map();
+function sceneCommand(mutate,message){
+  if(exporting||recording)return false;
+  if(session.readOnly){notify('Tab ini baca-saja. Pilih “Buka salinan” atau “Ambil alih” pada banner.');return false;}
+  pause();finishKeyboardGesture();
+  const rollback=session.lastValidDocument();
+  try{
+    store.flush();
+    const target=mutate(store.doc);
+    project=store.reload(target?.id??store.sceneId);
+    session.commit();
+  }catch(err){
+    project=store.load(rollback);
+    notify(err.message);
+    afterSceneChange();
+    return false;
+  }
+  saveNow();updateHistoryUI();scheduleThumbnail();
+  afterSceneChange();
+  if(message)notify(message);
+  return true;
+}
+/** Menyegarkan seluruh UI setelah scene aktif atau daftar scene berubah. */
+function afterSceneChange(){
+  time=Math.min(time,project.duration);
+  if(![...project.actors,...project.rooms,project.camera].filter(Boolean).some(o=>o.id===selected))selected=project.actors[0]?.id||project.camera?.id||'camera';
+  // Scene kosong (tanpa aktor dan tanpa kamera) membuka tab Karakter, bukan tab kamera:
+  // tindakan pertama yang masuk akal di scene baru adalah menambah karakter.
+  tab=kind();if(tab==='camera'&&!project.camera)tab='actors';
+  $('#project-title').value=project.title;$('#duration').value=project.duration;
+  if(!project.camera&&view==='camera')resetView();
+  renderTabs();rebuild();buildPaths();updateTimeUI();updateScene();
+}
+/** Berpindah scene: navigasi, bukan perubahan kreatif — tidak menambah langkah undo. */
+function switchScene(sceneId){
+  if(exporting||recording||sceneId===store.sceneId)return;
+  pause();finishKeyboardGesture();
+  try{project=store.activate(sceneId);}catch(err){notify(err.message);return;}
+  time=0;selected=project.actors[0]?.id||project.camera?.id||'camera';
+  // `activeSceneId` ada di dalam dokumen, jadi tetap disimpan supaya reload kembali ke scene ini.
+  if(!session.readOnly)saveNow();
+  afterSceneChange();recordSession();scheduleThumbnail();
+}
+function renderScenes(){
+  const scenes=store.doc.scenes,activeScene=store.scene;
+  $('#scene-total').textContent=String(scenes.length).padStart(2,'0');
+  $('#scene-list').innerHTML=scenes.map((sc,i)=>{
+    const isActive=sc.id===store.sceneId,thumb=sceneThumbs.get(sc.id),shot=sc.shots[0];
+    if(renamingScene===sc.id)return `<div class="scene-row selected"><input class="scene-rename" id="scene-rename-input" maxlength="100" value="${esc(sc.name)}" aria-label="Nama scene"/></div>`;
+    return `<div class="scene-row ${isActive?'selected':''}"><button class="scene-open" data-scene-open="${esc(sc.id)}" aria-current="${isActive?'true':'false'}" aria-label="Buka ${esc(sc.name)}"><span class="scene-thumb">${thumb?`<img src="${esc(thumb)}" alt=""/>`:`<i>${String(i+1).padStart(2,'0')}</i>`}</span><span class="scene-text"><strong>${esc(sc.name)}</strong><small>${sc.actors.length} karakter · ${sc.setObjects.length} lokasi · ${shot?shot.duration:0}s</small></span></button></div>`;
+  }).join('');
+  $('#scene-actions').innerHTML=[
+    ['scene-move-up','chevron-up','Naikkan urutan scene'],
+    ['scene-move-down','chevron-down','Turunkan urutan scene'],
+    ['scene-rename','pencil-line',`Ganti nama scene ${activeScene.name}`],
+    ['scene-duplicate','copy',`Duplikat scene ${activeScene.name}`],
+    ['scene-delete','trash-2',`Hapus scene ${activeScene.name}`],
+  ].map(([id,ic,label])=>`<button class="ghost icon" id="${id}" title="${esc(label)}" aria-label="${esc(label)}">${icon(ic)}</button>`).join('');
+  const index=scenes.findIndex(sc=>sc.id===store.sceneId),blocked=session.readOnly||exporting||recording;
+  document.querySelectorAll('[data-scene-open]').forEach(b=>b.onclick=()=>switchScene(b.dataset.sceneOpen));
+  $('#scene-move-up').onclick=()=>sceneCommand(doc=>moveScene(doc,store.sceneId,-1)??store.scene,'Urutan scene diperbarui.');
+  $('#scene-move-down').onclick=()=>sceneCommand(doc=>moveScene(doc,store.sceneId,1)??store.scene,'Urutan scene diperbarui.');
+  $('#scene-rename').onclick=()=>{if(blocked)return;renamingScene=store.sceneId;renderScenes();const input=$('#scene-rename-input');input?.focus();input?.select();};
+  $('#scene-duplicate').onclick=()=>sceneCommand(doc=>duplicateScene(doc,store.sceneId),'Scene diduplikasi. Aktor, lokasi dan track disalin dengan ID baru.');
+  $('#scene-delete').onclick=()=>sceneCommand(doc=>removeScene(doc,store.sceneId),'Scene dihapus. Gunakan Undo untuk memulihkan.');
+  $('#scene-move-up').disabled=blocked||index<=0;
+  $('#scene-move-down').disabled=blocked||index<0||index>=scenes.length-1;
+  for(const id of ['#scene-rename','#scene-duplicate'])$(id).disabled=blocked;
+  $('#scene-delete').disabled=blocked||scenes.length<=1;
+  $('#add-scene').disabled=blocked;
+  $('#scene-notes').disabled=blocked;
+  if($('#scene-notes').value!==(activeScene.notes??''))$('#scene-notes').value=activeScene.notes??'';
+  const input=$('#scene-rename-input');
+  if(input){
+    const commit=()=>{const value=input.value,id=renamingScene;renamingScene=null;if(!id)return;sceneCommand(doc=>renameScene(doc,id,value));};
+    input.onblur=commit;
+    input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();input.blur();}if(e.key==='Escape'){renamingScene=null;renderScenes();}};
+  }
+  refreshIcons();
+}
+function renderBreadcrumb(){
+  const scene=store.scene,shot=store.shot;
+  $('#crumb-project').textContent=project.title;
+  $('#crumb-scene').textContent=scene.name;
+  $('#crumb-shot').textContent=shot.name;
+  $('#scene-eyebrow').innerHTML=`${esc(scene.name)} <span style="margin:0 7px;color:#b0b5a7">/</span> ${esc(shot.name)}`;
+  $('#camera-name-label').textContent=project.camera?project.camera.name:'Belum ada kamera';
+  document.title=`${project.title} — Blocking Room`;
+}
+$('#add-scene').onclick=()=>sceneCommand(doc=>addScene(doc),'Scene baru ditambahkan.');
+$('#scene-notes').onchange=e=>{const value=e.target.value;sceneCommand(doc=>{const scene=doc.scenes.find(sc=>sc.id===store.sceneId);scene.notes=value;return scene;});};
+// Kembali ke dashboard: pastikan penyimpanan selesai dan kunci writer dilepas dahulu.
+async function goDashboard(){
+  try{await autosave.flush();await sessionTracker.flush();}catch{/* status sudah dilaporkan */}
+  stored.lock?.dispose();
+  location.hash=DASHBOARD_ROUTE;
+  location.reload();
+}
+$('#back-dashboard').onclick=goDashboard;$('#crumb-dashboard').onclick=goDashboard;
+// ---------- F3-06: thumbnail per scene ----------
+// Diambil dari canvas kamera final (preserveDrawingBuffer) setelah perubahan mereda.
+// Ditulis ke store `assets`, bukan ke dokumen: kegagalannya tidak dapat menggagalkan
+// penyimpanan dokumen dan tidak pernah membuat langkah undo.
+let thumbTimer=null;
+export const THUMBNAIL_SIZE={width:320,height:180};
+function scheduleThumbnail(){
+  if(!repository||session.readOnly||exporting||storageBlocked)return;
+  clearTimeout(thumbTimer);
+  thumbTimer=setTimeout(()=>{captureThumbnail();},1500);
+}
+async function captureThumbnail(){
+  try{
+    if(!repository||session.readOnly||exporting||!project.camera)return;
+    const source=renderer3d.povCanvas;
+    if(!source?.width)return;
+    const canvas=document.createElement('canvas');
+    canvas.width=THUMBNAIL_SIZE.width;canvas.height=THUMBNAIL_SIZE.height;
+    canvas.getContext('2d').drawImage(source,0,0,canvas.width,canvas.height);
+    const dataUrl=canvas.toDataURL('image/jpeg',0.6);
+    if(!dataUrl.startsWith('data:image/jpeg'))return;
+    const sceneId=store.sceneId;
+    await repository.putThumbnail(store.doc.id,{id:`thumb-${sceneId}`,sceneId,dataUrl,byteSize:dataUrl.length,mimeType:'image/jpeg'});
+    sceneThumbs.set(sceneId,dataUrl);
+    renderScenes();
+  }catch{/* F3-06: kegagalan thumbnail tidak boleh menggagalkan apa pun */}
+}
+async function loadThumbnails(){
+  if(!repository)return;
+  try{
+    for(const asset of await repository.listAssets(store.doc.id))if(asset.sceneId&&asset.dataUrl)sceneThumbs.set(asset.sceneId,asset.dataUrl);
+    renderScenes();
+  }catch{/* daftar scene tetap memakai placeholder */}
+}
 // ---------- F2-04/F2-05/F2-07: cadangan, riwayat versi, banner antartab ----------
 function backupName(){return `${project.title.replace(/[^a-z0-9 -]/gi,'')||'scene'}-cadangan.json`;}
 $('#download-backup').onclick=()=>{download(new Blob([JSON.stringify(store.snapshot(),null,2)],{type:'application/json'}),backupName());notify('Cadangan diunduh. Buka kembali berkas ini untuk melanjutkan.');};
@@ -303,7 +444,7 @@ function applyReadOnly(readOnly,message){
   sessionTracker.setEnabled(!readOnly&&!!repository);
   $('#tab-banner').hidden=!readOnly;
   if(readOnly)$('#tab-banner-text').textContent=message??'Tab ini baca-saja: proyek sedang dibuka di tab lain. Perubahan tidak akan disimpan.';
-  for(const el of document.querySelectorAll('#add-object,#duration,#project-title,#record,#inspector input,#inspector select,#inspector button'))el.disabled=readOnly;
+  for(const el of document.querySelectorAll('#add-object,#add-scene,#scene-notes,#duration,#project-title,#record,#scene-actions button,#inspector input,#inspector select,#inspector button'))el.disabled=readOnly;
   updateHistoryUI();
   if(!readOnly){setStatusOverride(null);renderSaveStatus(autosave.status);}
   else setStatusOverride('Baca-saja — tidak disimpan');
@@ -328,6 +469,8 @@ $('#open-copy').onclick=async()=>{
     const copy=cloneProjectDocument(store.snapshot(),{title:`${project.title} (salinan)`});
     await repository.saveDocument(copy,{revision:true,revisionToken:1});
     setActiveProjectId(copy.id);
+    // Hash adalah target navigasi, bukan sumber kebenaran; samakan bila memang dipakai.
+    if(location.hash.startsWith('#/project/'))history.replaceState(null,'',projectRoute(copy.id));
     stored.lock?.dispose();
     notify('Salinan dibuat. Memuat ulang editor…');
     setTimeout(()=>location.reload(),200);
@@ -356,13 +499,16 @@ if(restored.recovered&&stored.sessionState)notify('Sebagian state sesi tidak dit
 time=restored.playhead;
 if(restored.selectedId)selected=restored.selectedId;
 tab=kind();
-renderTabs();buildScene();renderList();renderInspector();renderTimeline();resize();refreshIcons();updateHistoryUI();syncCameraUI();
+renderTabs();buildScene();renderList();renderInspector();renderTimeline();renderScenes();renderBreadcrumb();resize();refreshIcons();updateHistoryUI();syncCameraUI();
 if(restored.observerPose)renderer3d.setObserverPose(restored.observerPose);
 if(restored.activeTool!=='orbit')setMode(restored.activeTool);
 updateTimeUI();updateScene();
 renderSaveStatus(autosave.status);
 // Penyimpanan persisten boleh diminta, tetapi bukan pengganti cadangan (F2-08).
 if(repository&&!storageBlocked)requestPersistentStorage();
+// F3-01: urutan “terakhir dibuka” di dashboard; kegagalannya tidak penting.
+if(repository)repository.touchProject(store.doc.id).catch(()=>{});
+loadThumbnails();scheduleThumbnail();
 requestAnimationFrame(animate);
 // Read-only diagnostics for browser smoke checks.
 window.blockingRoom={getProject:()=>structuredClone(project),getDocument:()=>structuredClone(store.doc),getTime:()=>time,getSceneObjectCount:()=>renderer3d.actorMeshes.size+renderer3d.roomMeshes.size, getObjectState:id=>{const o=renderer3d.actorMeshes.get(id)||renderer3d.roomMeshes.get(id)||renderer3d.cameraMarker;return {visible:o.visible,rotation:o.rotation.y,position:o.position.toArray()};},getWalk:id=>{const g=renderer3d.actorMeshes.get(id);return [g.getObjectByName('leg-0').rotation.x,g.getObjectByName('leg-1').rotation.x];},getWalls:id=>{const panels=[];renderer3d.roomMeshes.get(id)?.traverse(o=>{if(o.userData.wallPanel)panels.push({wall:o.userData.wallPanel,position:o.position.toArray(),size:[o.geometry.parameters.width,o.geometry.parameters.height,o.geometry.parameters.depth]});});return panels;},getView:()=>view,projectPoint:(x,y,z)=>renderer3d.projectPoint(x,y,z), cameraDebug:()=>renderer3d.cameraDebug(),
@@ -377,5 +523,11 @@ window.blockingRoom={getProject:()=>structuredClone(project),getDocument:()=>str
  getStoredDocument:id=>repository?repository.getDocument(id??store.doc.id):Promise.resolve(null),
  getStoredSession:()=>repository?repository.getSession(store.doc.id):Promise.resolve(null),
  flushSession:()=>sessionTracker.flush(),
+ getScenes:()=>store.doc.scenes.map(s=>({id:s.id,name:s.name,order:s.order,notes:s.notes,actors:s.actors.length,rooms:s.setObjects.length,shot:s.shots[0]?.name})),
+ getActiveSceneId:()=>store.sceneId,
+ switchScene:id=>switchScene(id),
+ captureThumbnail:()=>captureThumbnail(),
+ getProjectMeta:()=>repository?repository.getProject(store.doc.id):Promise.resolve(null),
+ goDashboard:()=>goDashboard(),
  breakStorage:()=>{repository.saveDocument=()=>Promise.reject(new Error('kegagalan buatan'));},
  restoreStorage:()=>{delete repository.saveDocument;}};
