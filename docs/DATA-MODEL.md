@@ -104,12 +104,29 @@ Dokumen ini adalah kontrak yang dipakai `src/schema.js` (validator), `src/migrat
 
 ### Asset, Revision, ExportJob, SessionState
 
-Belum disimpan di dalam dokumen pada Fase 1; kontraknya dicatat agar Fase 2/3/5 tidak mengubah ownership:
+Semuanya milik repository, **bukan** bagian dari dokumen:
 
-- `Asset { id, projectId, contentHash, mimeType, byteSize, blobRef }` — milik proyek, disimpan terpisah dari dokumen (Fase 3).
-- `Revision { id, projectId, parentId, createdAt, snapshotRef, schemaVersion }` — snapshot recovery milik repository, **berbeda** dari undo sesi (Fase 2).
-- `ExportJob { id, projectId, revisionId, shotIds[], settings, status, outputRef? }` — merender dari revision immutable (Fase 5).
-- `SessionState { projectId, sceneId, shotId, selectedId, playhead, observerPose, activeTool }` — **UI state**, disimpan terpisah dari dokumen dan tidak pernah masuk undo (Fase 2, F2-06).
+- `Asset { id, projectId, contentHash, mimeType, byteSize, blobRef }` — store `assets` sudah ada, pengisiannya Fase 3.
+- `Revision { id, projectId, parentId, createdAt, schemaVersion, title, snapshot }` — snapshot recovery, **berbeda** dari undo sesi. Store `revisions`, index `projectId_createdAt`; minimal 10 revisi per proyek dipertahankan, batas simpan 20 dan kelebihan tertua dipangkas dalam transaksi save yang sama (Fase 2, F2-05).
+- `ExportJob { id, projectId, revisionId, shotIds[], settings, status, outputRef? }` — merender dari revision immutable (Fase 5, belum ada store).
+- `SessionState { projectId, sceneId, shotId, selectedId, playhead, observerPose, activeTool }` — **UI state**, store `session` (keyPath `projectId`), throttle 1 detik, tidak pernah masuk undo (Fase 2, F2-06). `observerPose = { x, y, z, targetX, targetY, targetZ }`.
+
+### Penyimpanan sejak Fase 2
+
+Sumber kebenaran adalah IndexedDB `blocking-room` (`src/repository.js`). Satu transaksi
+menulis `documents` + `projects` + `revisions` sekaligus, sehingga metadata dashboard
+tidak pernah menunjuk isi yang gagal ditulis.
+
+localStorage (`src/storage.js`) hanya menyimpan hal kecil yang harus dibaca sinkron:
+
+| Kunci | Isi |
+|---|---|
+| `blocking-room` | Dokumen lama (v1/v2) sebagai sumber migrasi. **Tidak pernah ditimpa** oleh hasil migrasi. |
+| `blocking-room.backup` | Salinan mentah sumber sebelum migrasi (copy-first). |
+| `blocking-room.migrated` | Id proyek hasil migrasi; ditulis hanya setelah transaksi commit sehingga migrasi ulang tidak membuat duplikat. |
+| `blocking-room.activeProject` | Proyek yang dibuka editor (sementara, sampai dashboard Fase 3). |
+| `blocking-room.pending` | Titipan sinkron saat tab ditutup: transaksi IndexedDB yang baru dimulai pada `pagehide` tidak dijamin commit. Diambil dan dibuang oleh bootstrap berikutnya. |
+| `blocking-room.writer.<projectId>` | Heartbeat writer untuk fallback kunci antartab. |
 
 ## 3. Invariant yang dijaga validator
 

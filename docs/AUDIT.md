@@ -17,7 +17,7 @@ Keputusan: hide aktor/ruangan berlaku juga pada video. Hide kamera hanya menyemb
 
 | Prioritas | Temuan/batas nyata | Dampak | Tindakan yang direkomendasikan |
 |---|---|---|---|
-| P0 | Penyimpanan hanya satu key `blocking-room` di localStorage | Tidak ada daftar proyek, isolasi scene, recovery atau penanganan konflik tab | Project repository, UUID, IndexedDB, autosave atomik, recovery dan dashboard — PRD R1 |
+| ~~P0~~ (selesai Fase 2) | Penyimpanan hanya satu key `blocking-room` di localStorage | Tidak ada daftar proyek, isolasi scene, recovery atau penanganan konflik tab | **Sudah dikerjakan:** `ProjectRepository` IndexedDB (`src/repository.js`), autosave atomik, ≥10 snapshot recovery, session state dan satu writer per proyek. Sisa: dashboard daftar proyek dan trash (Fase 3) |
 | P0 | Export memakai MediaRecorder real-time dan waktu animation frame | Frame count/tempo tergantung perangkat; codec browser berbeda; metadata durasi WebM belum dijamin seekable | Export settings, timebase frame, codec capability tests, deterministic render spike — R2 |
 | P1 | Karakter bergerak langsung melewati ruang; tidak ada pintu/collision | Blocking spasial dapat terlihat valid walau jalur menembus dinding | Dinding modular, pintu dan clearance warning opsional; jangan memblokir blocking artistik tanpa opsi |
 | P1 | Timeline menyimpan seluruh pose pada satu key; belum bisa drag/copy key | Sulit menyunting gerak dan arah secara terpisah atau mengubah timing | Track per properti, snapping, multi-select, easing dan keyframe editor |
@@ -32,9 +32,11 @@ Keputusan: hide aktor/ruangan berlaku juga pada video. Hide kamera hanya menyemb
 
 ## Verifikasi yang tersedia
 
-- `npm test`: 8 tes unit — sampling linear/rotasi, clamp waktu, upsert, schema, migrasi flag lama, history undo/redo, transaksi dan batas history.
+- `npm test`: 64 tes unit — sampling linear/rotasi, clamp waktu, upsert, schema v2, migrasi v1→v2, document/command/history, fixture v1, serta repository IndexedDB, autosave, session state, kunci antartab dan pemulihan titipan (Fase 2).
 - `node tests/browser-smoke.mjs`: scene awal, tambah/edit aktor, keyframe, lensa, playback, JSON download/import, localStorage, video download, no browser exception dan mobile overflow.
 - `node tests/editor-regression.mjs`: undo/redo dan cabang baru; hidden geometry dan perubahan POV; lock inspector/delete/pointer/keyboard; drag miss tidak mengubah data; satu drag satu undo; lokasi default lock/unlock; transform karakter di final camera; yaw independen; recording terikat pada aktor dan dapat di-undo satu langkah; JSON/reload/import undo; layout desktop/ponsel.
+- `node tests/migration-browser.mjs`: migrasi localStorage v1→v2 di editor, kesetaraan pose dengan golden Fase 0, impor v1/invalid, roundtrip v2, schema lebih baru tidak ditimpa.
+- `node tests/repository-browser.mjs`: autosave atomik dan status jujur, ≥10 snapshot recovery + pulihkan sebagai langkah undo, session state, dua tab (writer/read-only, ambil alih), dua proyek berjudul sama, ganti proyek saat save pending, kegagalan simpan + cadangan, 100 siklus edit/save/reload.
 - `npm run build`: bundle produksi Vite.
 - Gambar review: `artifacts/revision-desktop.png`, `artifacts/revision-final-view.png`, `artifacts/revision-mobile.png`. File artifacts merupakan hasil tes lokal, bukan aset produksi.
 

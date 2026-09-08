@@ -158,3 +158,47 @@ export class DocumentStore {
     return this.view;
   }
 }
+
+/**
+ * Salinan proyek dengan seluruh ID internal dipetakan ulang (dipakai "Buka salinan"
+ * pada tab read-only; Fase 3 memakainya kembali untuk duplicate di dashboard).
+ * Hubungan antar-ID dipertahankan: track tetap menunjuk objeknya, kamera tetap
+ * menunjuk target yang sama, scene/shot aktif tetap menunjuk entitas yang sama.
+ */
+export function cloneProjectDocument(doc, {id = newId, now = nowStamp, title} = {}) {
+  const map = new Map();
+  const remap = value => {
+    if (typeof value !== 'string' || value === '') return value;
+    if (!map.has(value)) map.set(value, id());
+    return map.get(value);
+  };
+  const source = clone(doc);
+  const stamp = now();
+  const projectId = remap(source.id);
+  return {
+    schemaVersion: source.schemaVersion,
+    id: projectId,
+    title: title ?? source.title,
+    createdAt: stamp,
+    updatedAt: stamp,
+    activeSceneId: remap(source.activeSceneId),
+    thumbnailRef: null,
+    assets: (source.assets ?? []).map(a => ({...a, id: remap(a.id), projectId})),
+    scenes: source.scenes.map(scene => ({
+      ...scene,
+      id: remap(scene.id),
+      projectId,
+      activeShotId: remap(scene.activeShotId),
+      actors: scene.actors.map(a => ({...a, id: remap(a.id)})),
+      setObjects: scene.setObjects.map(o => ({...o, id: remap(o.id)})),
+      shots: scene.shots.map(shot => ({
+        ...shot,
+        id: remap(shot.id),
+        sceneId: remap(scene.id),
+        cameraId: shot.cameraId ? remap(shot.cameraId) : null,
+        camera: shot.camera ? {...shot.camera, id: remap(shot.camera.id), targetId: remap(shot.camera.targetId)} : null,
+        tracks: shot.tracks.map(t => ({...t, objectId: remap(t.objectId)})),
+      })),
+    })),
+  };
+}

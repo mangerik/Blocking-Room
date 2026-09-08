@@ -336,6 +336,21 @@ export class SceneRenderer {
     this.observer.updateProjectionMatrix();
   }
 
+  /** Pose observer untuk SessionState (F2-06): posisi kamera observer + titik orbit. */
+  getObserverPose() {
+    const p = this.observer.position, t = this.controls.target;
+    return {x: p.x, y: p.y, z: p.z, targetX: t.x, targetY: t.y, targetZ: t.z};
+  }
+
+  /** Memulihkan pose observer. Pemanggil bertanggung jawab memvalidasi angkanya. */
+  setObserverPose(pose) {
+    if (!pose) return false;
+    this.observer.position.set(pose.x, pose.y, pose.z);
+    this.controls.target.set(pose.targetX, pose.targetY, pose.targetZ);
+    this.controls.update();
+    return true;
+  }
+
   resetView(top = false) {
     this.observer.position.set(...(top ? [0, 38, .01] : [16, 17, 21]));
     this.controls.target.set(0, 0, -1);

@@ -9,6 +9,17 @@ import {ProjectHistory} from './history.js';
 import {validateDocument} from './schema.js';
 
 /**
+ * Tab baca-saja (F2-07). Dilempar dari lapisan command, bukan dari UI, sehingga
+ * jalur edit apa pun — tombol, keyboard, drag, rekaman, impor — ikut terblokir.
+ */
+export class ReadOnlyError extends Error {
+  constructor() {
+    super('Tab ini baca-saja: proyek sedang dibuka di tab lain.');
+    this.name = 'ReadOnlyError';
+  }
+}
+
+/**
  * Memilah item untuk operasi massal. Item terkunci atau tersembunyi tidak pernah
  * dimutasi diam-diam; pemanggil wajib melaporkan daftar `skipped` kepada pengguna.
  */
@@ -36,6 +47,8 @@ export class EditorSession {
     this.store = store;
     this.limit = limit;
     this.histories = new Map();
+    /** Bila true, tidak ada perubahan kreatif yang boleh masuk history maupun storage. */
+    this.readOnly = false;
     this.useHistoryFor(store.doc);
   }
   useHistoryFor(doc) {
@@ -52,10 +65,13 @@ export class EditorSession {
   get canRedo() {return this.history.canRedo;}
   get grouping() {return this.history.grouping;}
 
+  /** Menolak setiap perubahan kreatif saat tab baca-saja. */
+  assertWritable() {if (this.readOnly) throw new ReadOnlyError();}
+
   /** Mulai transaksi gestur (drag, tahan tombol, rekaman): satu langkah undo. */
-  begin() {this.history.begin();}
+  begin() {this.assertWritable(); this.history.begin();}
   /** Akhiri transaksi gestur dan simpan satu langkah. */
-  end() {this.history.end(this.validatedSnapshot());}
+  end() {this.assertWritable(); this.history.end(this.validatedSnapshot());}
 
   /** Snapshot dokumen aktif yang sudah divalidasi; dipakai history dan penyimpanan. */
   validatedSnapshot() {
@@ -68,7 +84,7 @@ export class EditorSession {
   lastValidDocument() {return JSON.parse(this.history.entries[this.history.index]);}
 
   /** Menyimpan keadaan sekarang sebagai satu langkah history (no-op saat grouping). */
-  commit() {this.history.commit(this.validatedSnapshot());}
+  commit() {this.assertWritable(); this.history.commit(this.validatedSnapshot());}
 
   /**
    * Menjalankan satu perubahan kreatif pada scene view aktif.
@@ -76,6 +92,7 @@ export class EditorSession {
    * ke keadaan valid terakhir dan error diteruskan ke pemanggil.
    */
   run(mutate) {
+    this.assertWritable();
     const rollback = this.lastValidDocument();
     try {
       mutate(this.store.view);
@@ -103,6 +120,7 @@ export class EditorSession {
    * sehingga impor tetap dapat di-undo. Proyek berbeda memakai stack undo sendiri.
    */
   openDocument(doc) {
+    this.assertWritable();
     const sameProject = doc.id === this.store.doc.id;
     this.history.grouping = false;
     this.store.load(doc);
@@ -115,8 +133,8 @@ export class EditorSession {
   }
 
   /** Undo/redo memulihkan dokumen sekaligus scene/shot aktif di dalamnya. */
-  undo() {return this.restore('undo');}
-  redo() {return this.restore('redo');}
+  undo() {this.assertWritable(); return this.restore('undo');}
+  redo() {this.assertWritable(); return this.restore('redo');}
   restore(direction) {
     const doc = this.history[direction]();
     if (!doc) return null;

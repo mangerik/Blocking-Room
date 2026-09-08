@@ -1,53 +1,99 @@
-import { createIcons, Box, FolderOpen, Download, Film, Layers, Plus, CircleHelp, Scan, MousePointer2, Move, Route, Focus, SlidersHorizontal, Video, SkipBack, Play, Pause, Circle, PersonStanding, Cuboid, Eye, Diamond, Minus, Trash2, Undo2, Redo2, LockKeyhole, LockKeyholeOpen, EyeOff, RotateCw } from 'lucide';
-const icons={Box,FolderOpen,Download,Film,Layers,Plus,CircleHelp,Scan,MousePointer2,Move,Route,Focus,SlidersHorizontal,Video,SkipBack,Play,Pause,Circle,PersonStanding,Cuboid,Eye,Diamond,Minus,Trash2,Undo2,Redo2,LockKeyhole,LockKeyholeOpen,EyeOff,RotateCw};
+import { createIcons, Box, FolderOpen, Download, Film, Layers, Plus, CircleHelp, Scan, MousePointer2, Move, Route, Focus, SlidersHorizontal, Video, SkipBack, Play, Pause, Circle, PersonStanding, Cuboid, Eye, Diamond, Minus, Trash2, Undo2, Redo2, LockKeyhole, LockKeyholeOpen, EyeOff, RotateCw, History, LifeBuoy } from 'lucide';
+const icons={Box,FolderOpen,Download,Film,Layers,Plus,CircleHelp,Scan,MousePointer2,Move,Route,Focus,SlidersHorizontal,Video,SkipBack,Play,Pause,Circle,PersonStanding,Cuboid,Eye,Diamond,Minus,Trash2,Undo2,Redo2,LockKeyhole,LockKeyholeOpen,EyeOff,RotateCw,History,LifeBuoy};
 import { initialProject, palette, sample, putKey } from './model.js';
 import { validDoors, wallCrossings } from './spatial.js';
-import { DocumentStore } from './document.js';
-import { EditorSession, partitionByLock, describeSkipped } from './commands.js';
+import { DocumentStore, cloneProjectDocument } from './document.js';
+import { EditorSession, ReadOnlyError, partitionByLock, describeSkipped } from './commands.js';
 import { openProjectData } from './migrate.js';
 import { SchemaTooNewError } from './schema.js';
-import { loadDocument, saveDocument } from './storage.js';
+import { clearPendingDocument, setActiveProjectId, writePendingDocument } from './storage.js';
+import { bootstrap } from './bootstrap.js';
+import { AutosaveController, SAVE_STATUS } from './autosave.js';
+import { SessionTracker, restoreSession } from './session-state.js';
+import { StorageQuotaError, StorageUnavailableError, requestPersistentStorage } from './repository.js';
 import { SceneRenderer } from './scene-renderer.js';
 import { ExportService } from './export-service.js';
 import { formatTime, keyIndexAt, trimTrackToDuration } from './timeline-engine.js';
 import './style.css';
 const $=s=>document.querySelector(s),icon=n=>`<i data-lucide="${n}"></i>`,esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // Document state (schema v2) dipegang DocumentStore; editor bekerja pada scene view aktif.
-const stored=loadDocument();
+// Penyimpanan (Fase 2) ada di IndexedDB lewat ProjectRepository; bootstrap juga
+// mengurus migrasi localStorage, kunci writer antartab dan session state.
+const stored=await bootstrap({fallbackDocument:()=>openProjectData(initialProject()).document,onLockChange:info=>onLockChange(info)});
 const storageBlocked=stored.error instanceof SchemaTooNewError;
-const store=new DocumentStore(stored.document??openProjectData(initialProject()).document);
+const repository=stored.repository;
+const store=new DocumentStore(stored.document);
 const session=new EditorSession(store);
+session.readOnly=stored.readOnly;
+const autosave=new AutosaveController({repository,onStatus:(status,detail)=>renderSaveStatus(status,detail)});
+const sessionTracker=new SessionTracker({repository});
+autosave.setEnabled(!!repository&&!storageBlocked&&!session.readOnly);
+sessionTracker.setEnabled(!!repository&&!session.readOnly);
+const restored=restoreSession(store.doc,stored.sessionState);
 let project=store.view;
 // UI state: tidak pernah masuk history dan tidak pernah disimpan ke dokumen.
 let tab='actors',selected=project.actors[0]?.id||'camera',time=0,playing=false,mode='orbit',view='perspective',walls=true,paths=true,exporting=false,recording=false;
 let toastTimer,recordPose=null,recordFrom=0;
 $('#app').innerHTML=`
-<header><div class="header-left"><div class="brand"><div class="brand-mark">${icon('box')}</div><div>blocking room<small>A SPACE FOR YOUR NEXT SCENE</small></div></div><div class="header-divider"></div><div class="breadcrumb">Workspace <span style="margin:0 9px">/</span> <b>Scene studio</b></div></div><div class="header-actions"><button class="icon" id="undo" title="Undo (⌘/Ctrl Z)" aria-label="Undo" disabled>${icon('undo-2')}</button><button class="icon" id="redo" title="Redo (⌘/Ctrl Shift Z)" aria-label="Redo" disabled>${icon('redo-2')}</button><span class="saved" id="save-status">Tersimpan di browser</span><button id="import">${icon('folder-open')}<span class="button-text">Buka</span></button><button id="save">${icon('download')}<span class="button-text">Simpan proyek</span></button><button class="primary" id="export">${icon('film')}<span>Ekspor video</span></button></div></header>
+<header><div class="header-left"><div class="brand"><div class="brand-mark">${icon('box')}</div><div>blocking room<small>A SPACE FOR YOUR NEXT SCENE</small></div></div><div class="header-divider"></div><div class="breadcrumb">Workspace <span style="margin:0 9px">/</span> <b>Scene studio</b></div></div><div class="header-actions"><button class="icon" id="undo" title="Undo (⌘/Ctrl Z)" aria-label="Undo" disabled>${icon('undo-2')}</button><button class="icon" id="redo" title="Redo (⌘/Ctrl Shift Z)" aria-label="Redo" disabled>${icon('redo-2')}</button><span class="saved" id="save-status" data-state="idle">Menyiapkan…</span><button class="icon" id="download-backup" title="Unduh cadangan JSON" aria-label="Unduh cadangan JSON" hidden>${icon('life-buoy')}</button><button class="icon" id="revisions" title="Riwayat versi tersimpan" aria-label="Riwayat versi tersimpan">${icon('history')}</button><button id="import">${icon('folder-open')}<span class="button-text">Buka</span></button><button id="save">${icon('download')}<span class="button-text">Simpan proyek</span></button><button class="primary" id="export">${icon('film')}<span>Ekspor video</span></button></div></header>
 <div class="project-bar"><div><div class="eyebrow">SCENE 01 <span style="margin:0 7px;color:#b0b5a7">/</span> INTERIOR · DAY</div><div class="title-line"><input class="project-title-input" aria-label="Judul proyek" id="project-title" maxlength="100" value="${esc(project.title)}"/><span class="badge">PRE-VISUALIZATION</span></div></div><div class="steps"><span class="current"><i>1</i> Tata scene</span><span>—</span><span><i>2</i> Atur gerakan</span><span>—</span><span><i>3</i> Jadikan referensi</span></div></div>
 <main class="studio"><aside class="left-panel"><div class="panel-heading">Scene explorer ${icon('layers')}</div><nav class="tabs" aria-label="Jenis objek"><button data-tab="actors" class="active">Karakter</button><button data-tab="rooms">Lokasi</button><button data-tab="camera">Kamera</button></nav><div class="section-caption"><span id="list-caption">KARAKTER DALAM SCENE</span><span id="object-count"></span></div><div class="object-list" id="objects"></div><button class="add-object" id="add-object">${icon('plus')} Tambah karakter</button><div class="left-bottom"><div class="eyebrow">DIRECTOR’S NOTE</div><p class="scene-note">Dua karakter bertemu di galeri. Kamera mengikuti langkah Alex dari foyer menuju ruang utama.</p><div class="legend-row"><i></i><span id="scene-count"></span></div><button class="ghost small" id="help" style="margin:14px 0 0 -7px">${icon('circle-help')} Panduan singkat</button></div></aside>
 <section class="workarea" aria-label="Editor scene 3D"><div class="view-toolbar"><span class="view-title">${icon('box')} OBSERVER VIEW</span><div class="view-options"><button class="ghost active" data-view="perspective">Perspektif</button><button class="ghost" data-view="top">Atas</button><button class="ghost" data-view="camera">Kamera / final</button><button class="ghost" id="toggle-walls" title="Dinding transparan">${icon('scan')}<span>Dinding</span></button></div></div><div class="viewport" id="viewport"><div class="scene-labels" id="labels"></div></div><div class="tools-vertical"><button class="active" id="orbit-tool" title="Orbit scene (O)">${icon('mouse-pointer-2')}</button><button id="move-tool" title="Geser objek di lantai (G)">${icon('move')}</button><button id="rotate-tool" title="Putar karakter (R) — drag kiri/kanan">${icon('rotate-cw')}</button><button id="paths-tool" class="active" title="Tampilkan jalur gerakan">${icon('route')}</button><button id="reset-view" title="Reset sudut pandang">${icon('focus')}</button></div><div class="viewport-hint"><kbd>Drag</kbd> Putar tampilan <span>·</span> <kbd>Scroll</kbd> Zoom <span>·</span> <kbd>G</kbd> Geser objek</div><div class="path-warning" id="path-warning" role="status" hidden></div><div class="compass">↗</div><div class="help-panel" hidden><h3>Dari blocking ke film.</h3><p><b>1. Tata scene.</b> Tambah karakter dan ruangan. Pilih objek lalu ubah posisinya di panel kanan.</p><p><b>2. Buat gerakan.</b> Geser playhead ke waktu tujuan, pindahkan objek dengan tool G atau input posisi. Keyframe tersimpan otomatis.</p><p><b>3. Preview & ekspor.</b> Tekan Space untuk memutar. Ekspor merekam sudut pandang Kamera A.</p><p><b>Rotasi:</b> R lalu drag karakter ke kiri/kanan, atau Q/E untuk putar 5°. Panah menggeser tanpa mengubah arah hadap. Semua bekerja di Kamera / final.</p><p><b>Lock & hide:</b> gunakan gembok dan mata di daftar objek. Lokasi terkunci secara default. Item tersembunyi juga tidak tampil di video; kamera hanya menyembunyikan penandanya.</p><p><b>Undo/redo:</b> ⌘/Ctrl Z dan ⌘/Ctrl Shift Z. Satu drag atau rekaman = satu langkah.</p><p><b>Rekam gerak:</b> aktifkan tombol rekam, lalu gunakan panah untuk bergerak dan Q/E untuk berputar.</p><button class="small" id="close-help">Mengerti</button></div><div class="export-progress" hidden><span id="export-label">Merekam video…</span><progress id="export-meter" max="100" value="0"></progress><button class="small ghost" id="cancel-export">Batalkan</button></div></section>
 <aside class="right-panel"><div class="panel-heading">Camera & properties ${icon('sliders-horizontal')}</div><div class="camera-section"><div class="camera-title"><span>${icon('video')} Kamera A</span><span class="live-dot">LIVE PREVIEW</span></div><div class="camera-frame" id="camera-preview"><div class="frame-guide"></div><div id="no-camera" hidden>Belum ada kamera<br><small>Tambah kamera melalui Scene explorer.</small></div><button class="preview-edit" id="edit-camera-view" title="Edit karakter pada sudut pandang kamera">Edit final view ↗</button></div><div class="camera-meta"><span id="lens-label">35 mm · Perspective</span><span>16:9 · 720p</span></div></div><div class="inspector-title"><span id="inspector-name">Properti karakter</span><span class="eyebrow" id="inspector-kind">ACTOR</span></div><div class="inspector" id="inspector"></div></aside>
-<section class="timeline" aria-label="Timeline gerakan"><div class="timeline-head"><div class="transport"><button class="ghost icon small" id="rewind" title="Kembali ke awal">${icon('skip-back')}</button><button class="play" id="play" title="Putar / jeda (Space)">${icon('play')}</button><button class="ghost icon small" id="record" title="Rekam gerakan karakter dengan tombol panah">${icon('circle')}</button><div class="timecode"><b id="time-display">00:00.0</b> <span id="total-display">/ 00:12</span></div></div><div class="duration"><span>Durasi</span><input id="duration" type="number" min="1" max="120" value="${project.duration}" aria-label="Durasi scene"/><span>dtk</span></div></div><div class="timeline-body" id="timeline-body"><div class="ruler" id="ruler"></div><input class="scrub" type="range" min="0" max="${project.duration}" step="0.1" value="0" aria-label="Waktu timeline" id="scrub"/><div id="tracks"></div><div class="playhead" id="playhead"></div></div></section></main><div class="toast" role="status" id="toast"></div><input type="file" accept=".json,application/json" id="file-input" hidden/>`;
+<section class="timeline" aria-label="Timeline gerakan"><div class="timeline-head"><div class="transport"><button class="ghost icon small" id="rewind" title="Kembali ke awal">${icon('skip-back')}</button><button class="play" id="play" title="Putar / jeda (Space)">${icon('play')}</button><button class="ghost icon small" id="record" title="Rekam gerakan karakter dengan tombol panah">${icon('circle')}</button><div class="timecode"><b id="time-display">00:00.0</b> <span id="total-display">/ 00:12</span></div></div><div class="duration"><span>Durasi</span><input id="duration" type="number" min="1" max="120" value="${project.duration}" aria-label="Durasi scene"/><span>dtk</span></div></div><div class="timeline-body" id="timeline-body"><div class="ruler" id="ruler"></div><input class="scrub" type="range" min="0" max="${project.duration}" step="0.1" value="0" aria-label="Waktu timeline" id="scrub"/><div id="tracks"></div><div class="playhead" id="playhead"></div></div></section></main><div class="toast" role="status" id="toast"></div>
+<div class="tab-banner" id="tab-banner" role="alert" hidden><span id="tab-banner-text"></span><span class="tab-banner-actions"><button class="small" id="open-copy">Buka salinan</button><button class="small" id="take-over">Ambil alih</button></span></div>
+<div class="revision-dialog" id="revision-panel" role="dialog" aria-label="Riwayat versi tersimpan" hidden><div class="revision-head"><b>Riwayat versi</b><button class="ghost small" id="close-revisions">Tutup</button></div><div class="revision-list" id="revision-list"></div><button class="small" id="open-last-saved">Buka versi tersimpan terakhir</button><p class="hint">Snapshot dibuat otomatis saat menyimpan. Memulihkan versi menjadi satu langkah undo yang dapat dibatalkan.</p></div>
+<input type="file" accept=".json,application/json" id="file-input" hidden/>`;
 const refreshIcons=()=>createIcons({icons});
 function notify(message){$('#toast').textContent=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').textContent='',3800);}
-function saveNow(){
-  if(storageBlocked){$('#save-status').textContent='Tidak disimpan — schema lebih baru';return;}
-  try{saveDocument(store.doc);$('#save-status').textContent='Tersimpan di browser';}catch{$('#save-status').textContent='Simpan proyek untuk mengunduh';}
+const SAVE_TEXT={idle:'Tersimpan lokal',saving:'Menyimpan…',saved:'Tersimpan lokal',error:'Gagal menyimpan'};
+let statusOverride=null;
+// Status hanya boleh berkata "tersimpan" setelah transaksi IndexedDB commit (F2-04).
+function renderSaveStatus(status,detail){
+  const el=$('#save-status');if(!el)return;
+  // Titipan darurat dibuang segera setelah ada transaksi yang benar-benar commit.
+  if(status===SAVE_STATUS.saved)clearPendingDocument();
+  const text=statusOverride??SAVE_TEXT[status]??SAVE_TEXT.idle;
+  el.textContent=text;el.dataset.state=statusOverride?'error':status;
+  $('#download-backup').hidden=!(statusOverride||status==='error');
+  if(status==='error'&&detail?.error){
+    notify(detail.quota||detail.unavailable?detail.error.message:`Gagal menyimpan: ${detail.error.message} Perubahan masih ada di memori — unduh cadangan.`);
+  }
+}
+function setStatusOverride(text){statusOverride=text;renderSaveStatus(autosave.status);}
+// Satu-satunya pemicu penyimpanan: autosave dengan coalesce + revision token.
+function saveNow(options){
+  if(storageBlocked||!repository||session.readOnly)return;
+  autosave.schedule(store.doc,options);
+}
+let lastSessionSignature='';
+// SessionState ditulis throttled dan hanya bila benar-benar berubah, supaya memutar
+// timeline tidak membanjiri IndexedDB. Ini UI state: bukan langkah undo.
+function recordSession(){
+  if(!repository||session.readOnly||exporting)return;
+  const pose=renderer3d.getObserverPose();
+  const signature=`${store.sceneId}|${store.shotId}|${selected}|${time.toFixed(2)}|${mode}|${[pose.x,pose.y,pose.z,pose.targetX,pose.targetY,pose.targetZ].map(n=>n.toFixed(2)).join(',')}`;
+  if(signature===lastSessionSignature)return;
+  lastSessionSignature=signature;
+  sessionTracker.record({projectId:store.doc.id,sceneId:store.sceneId,shotId:store.shotId,
+    selectedId:selected,playhead:time,observerPose:pose,activeTool:mode});
 }
 // Satu-satunya jalur penyimpanan: scene view → dokumen v2 → validasi → history → storage.
 function persist(track=true){
+  // Tab baca-saja: perubahan apa pun dibatalkan di lapisan command, bukan hanya di UI.
+  if(session.readOnly){project=store.load(session.lastValidDocument());notify('Tab ini baca-saja. Pilih “Buka salinan” atau “Ambil alih” pada banner.');updateHistoryUI();rebuild();return false;}
   if(track){
     try{session.commit();}
-    catch(err){project=store.load(session.lastValidDocument());notify(`Perubahan ditolak: ${err.message}`);saveNow();updateHistoryUI();rebuild();return false;}
+    catch(err){project=store.load(session.lastValidDocument());notify(err instanceof ReadOnlyError?err.message:`Perubahan ditolak: ${err.message}`);saveNow();updateHistoryUI();rebuild();return false;}
   }else store.flush();
   saveNow();updateHistoryUI();return true;
 }
 function updateHistoryUI(){
-  $('#undo').disabled=exporting||recording||!session.canUndo;
-  $('#redo').disabled=exporting||recording||!session.canRedo;
+  $('#undo').disabled=exporting||recording||session.readOnly||!session.canUndo;
+  $('#redo').disabled=exporting||recording||session.readOnly||!session.canRedo;
 }
 function restoreHistory(direction){
-  if(exporting||recording||drag)return;
+  if(exporting||recording||drag||session.readOnly)return;
   pause();finishKeyboardGesture();
   const next=session[direction]();if(!next)return;
   project=next;time=Math.min(time,project.duration);
@@ -210,10 +256,126 @@ function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last
  if(playing){time=Math.min(project.duration,time+dt);
   if(recording&&now-recordTick>95){recordTick=now;const recorded=objectData();recorded.keys=recorded.keys.filter(k=>k.t<=recordFrom||k.t>=Math.round(time*10)/10);const dx=(keysDown.has('arrowright')?1:0)-(keysDown.has('arrowleft')?1:0),dz=(keysDown.has('arrowdown')?1:0)-(keysDown.has('arrowup')?1:0);if(dx||dz)moveSelected(dx*.18,dz*.18);const turn=(keysDown.has('e')?1:0)-(keysDown.has('q')?1:0);if(turn)rotateSelected(turn*6);if(!dx&&!dz&&!turn){const o=objectData();if(editable(o))putKey(o.keys,recordPose,time);}recordFrom=Math.round(time*10)/10;}
   updateTimeUI();updateScene();if(time>=project.duration){if(exporting){playing=false;renderer3d.renderPOV(project);exportService.stop();}else pause();}}
- renderer3d.renderViewport(project);}
-if(stored.error&&!storageBlocked)notify(`Data tersimpan tidak terbaca; salinan mentah disimpan sebagai cadangan. (${stored.error.message})`);
-if(storageBlocked)notify(stored.error.message);
-if(stored.migrated)notify('Proyek lama (schema v1) dimigrasikan ke schema v2. Salinan sumber disimpan sebagai cadangan.');
-renderTabs();buildScene();renderList();renderInspector();renderTimeline();resize();refreshIcons();updateHistoryUI();syncCameraUI();saveNow();requestAnimationFrame(animate);
+ renderer3d.renderViewport(project);recordSession();}
+// ---------- F2-04/F2-05/F2-07: cadangan, riwayat versi, banner antartab ----------
+function backupName(){return `${project.title.replace(/[^a-z0-9 -]/gi,'')||'scene'}-cadangan.json`;}
+$('#download-backup').onclick=()=>{download(new Blob([JSON.stringify(store.snapshot(),null,2)],{type:'application/json'}),backupName());notify('Cadangan diunduh. Buka kembali berkas ini untuk melanjutkan.');};
+const stamp=iso=>{const d=new Date(iso);return Number.isNaN(d.getTime())?iso:d.toLocaleString('id-ID',{dateStyle:'short',timeStyle:'medium'});};
+async function renderRevisions(){
+  const list=$('#revision-list');
+  if(!repository){list.innerHTML='<p class="hint">Penyimpanan tidak tersedia, jadi belum ada versi tersimpan.</p>';return;}
+  await autosave.flush();
+  let rows=[];
+  try{rows=await repository.listRevisions(store.doc.id);}catch(err){list.innerHTML=`<p class="hint">Gagal membaca riwayat: ${esc(err.message)}</p>`;return;}
+  list.innerHTML=rows.length?rows.map((r,i)=>`<div class="revision-row"><span><b>${esc(stamp(r.createdAt))}</b><small>${i===0?'Versi terbaru':`${Math.round(r.byteSize/1024)} kB`}</small></span><button class="small" data-revision="${esc(r.id)}"${session.readOnly?' disabled':''}>Pulihkan</button></div>`).join(''):'<p class="hint">Belum ada snapshot. Snapshot dibuat otomatis saat menyimpan.</p>';
+  list.querySelectorAll('[data-revision]').forEach(b=>b.onclick=()=>restoreRevision(b.dataset.revision));
+}
+async function restoreRevision(id){
+  if(session.readOnly){notify('Tab baca-saja tidak dapat memulihkan versi.');return;}
+  try{
+    const row=await repository.getRevision(id);
+    if(!row?.snapshot){notify('Versi tidak ditemukan.');return;}
+    pause();finishKeyboardGesture();
+    project=session.openDocument(openProjectData(row.snapshot).document);
+    time=0;selected=project.actors[0]?.id||project.camera?.id||'camera';tab=kind();
+    $('#project-title').value=project.title;$('#duration').value=project.duration;
+    renderTabs();changed();updateTimeUI();
+    $('#revision-panel').hidden=true;
+    notify(`Versi ${stamp(row.createdAt)} dipulihkan. Tekan ⌘/Ctrl Z untuk membatalkan.`);
+  }catch(err){notify(`Gagal memulihkan versi: ${err.message}`);}
+}
+$('#revisions').onclick=()=>{const panel=$('#revision-panel');panel.hidden=!panel.hidden;if(!panel.hidden)renderRevisions();};
+$('#close-revisions').onclick=()=>{$('#revision-panel').hidden=true;};
+$('#open-last-saved').onclick=async()=>{
+  if(!repository){notify('Penyimpanan tidak tersedia.');return;}
+  await autosave.flush();
+  const saved=await repository.getDocument(store.doc.id);
+  if(!saved){notify('Belum ada versi tersimpan untuk proyek ini.');return;}
+  if(session.readOnly){notify('Tab baca-saja tidak dapat mengganti dokumen.');return;}
+  pause();project=session.openDocument(saved);time=0;selected=project.actors[0]?.id||project.camera?.id||'camera';tab=kind();
+  $('#project-title').value=project.title;$('#duration').value=project.duration;renderTabs();changed();updateTimeUI();
+  $('#revision-panel').hidden=true;notify('Versi tersimpan terakhir dibuka.');
+};
+// F2-07: satu writer per proyek. Read-only diblokir di lapisan command; banner memberi pilihan.
+function applyReadOnly(readOnly,message){
+  session.readOnly=readOnly;
+  autosave.setEnabled(!readOnly&&!!repository&&!storageBlocked);
+  sessionTracker.setEnabled(!readOnly&&!!repository);
+  $('#tab-banner').hidden=!readOnly;
+  if(readOnly)$('#tab-banner-text').textContent=message??'Tab ini baca-saja: proyek sedang dibuka di tab lain. Perubahan tidak akan disimpan.';
+  for(const el of document.querySelectorAll('#add-object,#duration,#project-title,#record,#inspector input,#inspector select,#inspector button'))el.disabled=readOnly;
+  updateHistoryUI();
+  if(!readOnly){setStatusOverride(null);renderSaveStatus(autosave.status);}
+  else setStatusOverride('Baca-saja — tidak disimpan');
+}
+function onLockChange(info){
+  if(!document.getElementById('tab-banner'))return;
+  if(info?.writerGone&&session.readOnly)$('#tab-banner-text').textContent='Tab penulis sebelumnya sudah menutup proyek ini. Pilih “Ambil alih” untuk melanjutkan mengedit di tab ini.';
+}
+$('#take-over').onclick=async()=>{
+  if(!stored.lock){notify('Kunci tulis tidak tersedia di browser ini.');return;}
+  const result=await stored.lock.takeOver();
+  if(!result.ok){notify(result.reason);return;}
+  const fresh=repository?await repository.getDocument(store.doc.id).catch(()=>null):null;
+  if(fresh){project=store.load(fresh);session.useHistoryFor(store.doc);}
+  applyReadOnly(false);
+  renderTabs();rebuild();updateTimeUI();saveNow();
+  notify('Tab ini sekarang menjadi penulis proyek.');
+};
+$('#open-copy').onclick=async()=>{
+  if(!repository){notify('Penyimpanan tidak tersedia, salinan tidak dapat dibuat.');return;}
+  try{
+    const copy=cloneProjectDocument(store.snapshot(),{title:`${project.title} (salinan)`});
+    await repository.saveDocument(copy,{revision:true,revisionToken:1});
+    setActiveProjectId(copy.id);
+    stored.lock?.dispose();
+    notify('Salinan dibuat. Memuat ulang editor…');
+    setTimeout(()=>location.reload(),200);
+  }catch(err){notify(`Gagal membuat salinan: ${err.message}`);}
+};
+// Simpan terakhir saat tab ditutup/di-reload: jadwal yang belum jatuh tempo tidak boleh hilang.
+let unloaded=false;
+function onUnload(){if(unloaded)return;unloaded=true;try{
+  // localStorage sinkron dipakai sebagai titipan: transaksi IndexedDB yang baru
+  // dimulai di sini belum tentu sempat commit sebelum halaman dibongkar.
+  const pending=autosave.unconfirmed();
+  if(pending&&!session.readOnly)writePendingDocument(pending.doc);
+  autosave.flushOnUnload();sessionTracker.flush();stored.lock?.release();
+}catch{/* penutupan tab */}}
+window.addEventListener('pagehide',onUnload);
+window.addEventListener('beforeunload',onUnload);
+// ---------- pesan pembuka ----------
+if(stored.unavailable){setStatusOverride('Penyimpanan tidak tersedia');notify('Penyimpanan browser tidak tersedia (mode privat atau diblokir). Proyek tetap dapat diedit di memori — unduh cadangan sebelum menutup tab.');}
+else if(stored.error&&!storageBlocked)notify(`Data tersimpan tidak terbaca; salinan mentah disimpan sebagai cadangan. (${stored.error.message})`);
+if(storageBlocked){setStatusOverride('Tidak disimpan — schema lebih baru');notify(stored.error.message);}
+if(stored.migrated)notify('Proyek lama (schema v1) dimigrasikan ke IndexedDB. Sumber lama dan salinan cadangan tetap disimpan.');
+if(stored.recoveredPending)notify('Perubahan terakhir sebelum tab ditutup berhasil dipulihkan.');
+if(stored.readOnly&&!storageBlocked)applyReadOnly(true);
+if(restored.recovered&&stored.sessionState)notify('Sebagian state sesi tidak ditemukan lagi; editor kembali ke scene dan seleksi yang aman.');
+// F2-06: pulihkan session state (playhead, seleksi, tool, pose observer).
+time=restored.playhead;
+if(restored.selectedId)selected=restored.selectedId;
+tab=kind();
+renderTabs();buildScene();renderList();renderInspector();renderTimeline();resize();refreshIcons();updateHistoryUI();syncCameraUI();
+if(restored.observerPose)renderer3d.setObserverPose(restored.observerPose);
+if(restored.activeTool!=='orbit')setMode(restored.activeTool);
+updateTimeUI();updateScene();
+renderSaveStatus(autosave.status);
+// Penyimpanan persisten boleh diminta, tetapi bukan pengganti cadangan (F2-08).
+if(repository&&!storageBlocked)requestPersistentStorage();
+requestAnimationFrame(animate);
 // Read-only diagnostics for browser smoke checks.
-window.blockingRoom={getProject:()=>structuredClone(project),getDocument:()=>structuredClone(store.doc),getTime:()=>time,getSceneObjectCount:()=>renderer3d.actorMeshes.size+renderer3d.roomMeshes.size, getObjectState:id=>{const o=renderer3d.actorMeshes.get(id)||renderer3d.roomMeshes.get(id)||renderer3d.cameraMarker;return {visible:o.visible,rotation:o.rotation.y,position:o.position.toArray()};},getWalk:id=>{const g=renderer3d.actorMeshes.get(id);return [g.getObjectByName('leg-0').rotation.x,g.getObjectByName('leg-1').rotation.x];},getWalls:id=>{const panels=[];renderer3d.roomMeshes.get(id)?.traverse(o=>{if(o.userData.wallPanel)panels.push({wall:o.userData.wallPanel,position:o.position.toArray(),size:[o.geometry.parameters.width,o.geometry.parameters.height,o.geometry.parameters.depth]});});return panels;},getView:()=>view,projectPoint:(x,y,z)=>renderer3d.projectPoint(x,y,z), cameraDebug:()=>renderer3d.cameraDebug()};
+window.blockingRoom={getProject:()=>structuredClone(project),getDocument:()=>structuredClone(store.doc),getTime:()=>time,getSceneObjectCount:()=>renderer3d.actorMeshes.size+renderer3d.roomMeshes.size, getObjectState:id=>{const o=renderer3d.actorMeshes.get(id)||renderer3d.roomMeshes.get(id)||renderer3d.cameraMarker;return {visible:o.visible,rotation:o.rotation.y,position:o.position.toArray()};},getWalk:id=>{const g=renderer3d.actorMeshes.get(id);return [g.getObjectByName('leg-0').rotation.x,g.getObjectByName('leg-1').rotation.x];},getWalls:id=>{const panels=[];renderer3d.roomMeshes.get(id)?.traverse(o=>{if(o.userData.wallPanel)panels.push({wall:o.userData.wallPanel,position:o.position.toArray(),size:[o.geometry.parameters.width,o.geometry.parameters.height,o.geometry.parameters.depth]});});return panels;},getView:()=>view,projectPoint:(x,y,z)=>renderer3d.projectPoint(x,y,z), cameraDebug:()=>renderer3d.cameraDebug(),
+ // Kait uji Fase 2 (tests/repository-browser.mjs): status penyimpanan, revisi, kunci tab.
+ getSaveStatus:()=>({status:autosave.status,text:$('#save-status').textContent,error:autosave.lastError?.name??null}),
+ isReadOnly:()=>session.readOnly,
+ flushSave:()=>autosave.flush(),
+ saveRevisionNow:()=>{autosave.schedule(store.doc,{revision:true});return autosave.flush();},
+ listRevisions:()=>repository?repository.listRevisions(store.doc.id):Promise.resolve([]),
+ getProjectId:()=>store.doc.id,
+ listProjects:()=>repository?repository.listProjects():Promise.resolve([]),
+ getStoredDocument:id=>repository?repository.getDocument(id??store.doc.id):Promise.resolve(null),
+ getStoredSession:()=>repository?repository.getSession(store.doc.id):Promise.resolve(null),
+ flushSession:()=>sessionTracker.flush(),
+ breakStorage:()=>{repository.saveDocument=()=>Promise.reject(new Error('kegagalan buatan'));},
+ restoreStorage:()=>{delete repository.saveDocument;}};

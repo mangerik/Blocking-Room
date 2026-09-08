@@ -31,7 +31,15 @@ assert.equal(doc.scenes[0].shots[0].duration, 10);
 assert.equal(doc.scenes[0].shots[0].tracks.length, 3);
 assert.equal((await project()).title, 'Jalur berjalan');
 assert.equal(await stored('blocking-room.backup'), raw, 'sumber v1 harus dicadangkan sebelum ditimpa');
-assert.match(await stored('blocking-room'), /"schemaVersion": ?2/);
+// Fase 2: hasil migrasi tinggal di IndexedDB, bukan lagi di kunci localStorage.
+// Sumber lama justru DIPERTAHANKAN apa adanya (copy-first) dan penanda migrasi
+// mencegah proyek duplikat pada pemuatan berikutnya.
+assert.equal(await stored('blocking-room'), raw, 'sumber v1 tidak boleh ditimpa oleh hasil migrasi');
+assert.equal(await stored('blocking-room.migrated'), doc.id, 'penanda migrasi berisi id proyek hasil migrasi');
+assert.equal(await stored('blocking-room.activeProject'), doc.id);
+const persisted = await page.evaluate(() => window.blockingRoom.getStoredDocument());
+assert.equal(persisted.schemaVersion, 2, 'dokumen hasil migrasi tersimpan di IndexedDB');
+assert.equal(persisted.id, doc.id);
 
 // Pose awal/tengah/akhir sama dengan golden Fase 0.
 const golden = baseline('walk-path');
