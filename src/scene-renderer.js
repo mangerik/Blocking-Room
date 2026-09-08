@@ -77,11 +77,13 @@ export class SceneRenderer {
 
     this.roomsGroup = new THREE.Group();
     this.actorsGroup = new THREE.Group();
-    this.decorGroup = new THREE.Group();
+    this.decorGroup = new THREE.Group();   // prop ber-ID (F4-07)
+    this.wallsGroup = new THREE.Group();   // segmen dinding modular (F4-08)
     this.pathsGroup = new THREE.Group();
-    this.scene.add(this.roomsGroup, this.actorsGroup, this.decorGroup, this.pathsGroup);
+    this.scene.add(this.roomsGroup, this.actorsGroup, this.decorGroup, this.wallsGroup, this.pathsGroup);
     this.actorMeshes = new Map();
     this.roomMeshes = new Map();
+    this.propMeshes = new Map();
     this.labels = [];
 
     this.cameraMarker = new THREE.Group();
@@ -205,9 +207,10 @@ export class SceneRenderer {
   /** Membangun ulang seluruh geometri scene dari scene view. */
   build(view, time) {
     const box = SceneRenderer.box;
-    [this.roomsGroup, this.actorsGroup, this.decorGroup].forEach(SceneRenderer.clearGroup);
+    [this.roomsGroup, this.actorsGroup, this.decorGroup, this.wallsGroup].forEach(SceneRenderer.clearGroup);
     this.actorMeshes.clear();
     this.roomMeshes.clear();
+    this.propMeshes.clear();
     this.labels.length = 0;
     this.labelLayer.innerHTML = '';
 
@@ -241,29 +244,13 @@ export class SceneRenderer {
       edge.position.y = r.h / 2;
       g.add(edge);
       this.addLabel(`${String(i + 1).padStart(2, '0')} / ${r.name}`, 'room', r.id, new THREE.Vector3(r.x, .2, r.z + (i === 2 ? -r.d / 2 - .6 : r.d / 2 + .3)));
-      // Set dressing arsitektural mengikuti dimensi ruangannya.
-      if (i === 1) {
-        box(g, r.w * .32, .6, .85, .5, .37, -r.d * .12, '#b9ab8e');
-        box(g, r.w * .34, .1, .96, .5, .72, -r.d * .12, '#e6dcc4');
-        for (const x of [-r.w * .32, r.w * .32]) {
-          box(g, .65, 1, .65, x, .58, -r.d * .30, '#e7dfcb');
-          const sculpture = new THREE.Mesh(new THREE.IcosahedronGeometry(.38, 0), new THREE.MeshStandardMaterial({color: '#8a927d', roughness: .9}));
-          sculpture.position.set(x, 1.45, -r.d * .30);
-          g.add(sculpture);
-        }
-        for (const x of [-r.w * .27, 0, r.w * .27]) {
-          const doorway = r.doors?.find(d => d.wall === 'back');
-          if (doorway && Math.abs(x - doorway.offset) < doorway.width / 2 + .75) continue;
-          box(g, 1.5, 1.35, .08, x, 1.75, -r.d / 2 + .08, '#ece5d6');
-          box(g, 1.25, 1.1, .09, x, 1.75, -r.d / 2 + .14, x === 0 ? '#a08767' : '#788c80');
-        }
-      }
-      if (i === 0) {
-        box(g, 1.8, .7, .65, -r.w * .22, .4, -r.d * .25, '#82958b');
-        box(g, 1.9, .1, .75, -r.w * .22, .8, -r.d * .25, '#dce1d4');
-      }
-      if (i === 2) box(g, r.w * .42, .8, .7, 0, .45, -r.d * .2, '#96a18b');
+      // v3 (F4-07): set dressing TIDAK lagi digambar dari indeks ruangan. Dekorasi
+      // contoh sudah menjadi prop ber-ID pada `view.props` lewat migrasi v2 → v3,
+      // sehingga ia dapat dipilih, dipindah, dikunci, disembunyikan dan dihapus.
     });
+
+    this.buildProps(view);
+    this.buildWalls(view);
 
     view.actors.forEach(a => {
       const g = new THREE.Group();
@@ -323,6 +310,68 @@ export class SceneRenderer {
     this.update(view, time);
   }
 
+  /** Prop ber-ID (F4-07/SC-01). Setiap prop adalah grup dengan `userData.id` sendiri. */
+  buildProps(view) {
+    const box = SceneRenderer.box;
+    for (const p of view.props ?? []) {
+      const g = new THREE.Group();
+      g.position.set(p.x, p.y ?? 0, p.z);
+      g.rotation.y = THREE.MathUtils.degToRad(p.r ?? 0);
+      g.userData.id = p.id;
+      g.visible = p.visible !== false;
+      this.decorGroup.add(g);
+      this.propMeshes.set(p.id, g);
+      const {w, h, d} = p;
+      if (p.shape === 'decor') {
+        const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(w / 2, 0), new THREE.MeshStandardMaterial({color: p.color, roughness: .9}));
+        g.add(mesh);
+      } else if (p.shape === 'table') {
+        box(g, w, h * .08, d, 0, h * .46, 0, p.color);
+        for (const [sx, sz] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {
+          box(g, w * .08, h * .92, d * .08, sx * (w / 2 - w * .07), -h * .04, sz * (d / 2 - d * .07), p.color);
+        }
+      } else if (p.shape === 'chair') {
+        box(g, w, h * .08, d, 0, -h * .04, 0, p.color);
+        box(g, w, h * .5, d * .1, 0, h * .25, -d / 2 + d * .05, p.color);
+        for (const [sx, sz] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {
+          box(g, w * .1, h * .46, d * .1, sx * (w / 2 - w * .08), -h * .3, sz * (d / 2 - d * .08), p.color);
+        }
+      } else {
+        box(g, w, h, d, 0, 0, 0, p.color);
+      }
+      const ring = new THREE.Mesh(new THREE.RingGeometry(Math.max(w, d) * .58, Math.max(w, d) * .66, 32), new THREE.MeshBasicMaterial({color: '#3c4a34', side: THREE.DoubleSide}));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = -(p.y ?? 0) + .06;
+      ring.name = 'selection';
+      ring.visible = false;
+      g.add(ring);
+      g.traverse(o => {if (o.isMesh && o.name !== 'selection') {o.castShadow = true; o.receiveShadow = true;}});
+    }
+  }
+
+  /** Segmen dinding modular (F4-08/SC-01). Pintu ruangan tidak tersentuh. */
+  buildWalls(view) {
+    const box = SceneRenderer.box;
+    for (const w of view.walls ?? []) {
+      const g = new THREE.Group();
+      g.position.set(w.x, 0, w.z);
+      g.rotation.y = THREE.MathUtils.degToRad(w.r ?? 0);
+      g.userData.id = w.id;
+      g.visible = w.visible !== false;
+      this.wallsGroup.add(g);
+      this.propMeshes.set(w.id, g);
+      // Panjang segmen mengikuti sumbu lokal Z, sama dengan konvensi arah 0° → +Z.
+      const mesh = box(g, w.thickness, w.height, w.length, 0, w.height / 2, 0, w.color, this.walls ? .45 : 1);
+      mesh.userData.wallSegment = true;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(w.length * .5, w.length * .5 + .12, 40), new THREE.MeshBasicMaterial({color: '#3c4a34', side: THREE.DoubleSide}));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = .06;
+      ring.name = 'selection';
+      ring.visible = false;
+      g.add(ring);
+    }
+  }
+
   buildPaths(view) {
     SceneRenderer.clearGroup(this.pathsGroup);
     const tracks = [...view.actors, ...(view.camera ? [{...view.camera, color: '#748466'}] : [])];
@@ -357,6 +406,10 @@ export class SceneRenderer {
         g.getObjectByName(`leg-${i}`).rotation.x = actor.gait.angle * (i === 0 ? 1 : -1);
         g.getObjectByName(`arm-${i}`).rotation.x = actor.gait.angle * (i === 0 ? -.65 : .65);
       }
+    }
+    for (const [id, g] of this.propMeshes) {
+      const ring = g.getObjectByName('selection');
+      if (ring) ring.visible = id === this.selected;
     }
     if (!frame.camera) {
       this.helper.visible = false;
@@ -551,7 +604,7 @@ export class SceneRenderer {
    * texture dan program shader tetap dipegang driver sampai tab ditutup.
    */
   dispose() {
-    for (const group of [this.roomsGroup, this.actorsGroup, this.decorGroup, this.pathsGroup]) {
+    for (const group of [this.roomsGroup, this.actorsGroup, this.decorGroup, this.wallsGroup, this.pathsGroup]) {
       SceneRenderer.clearGroup(group);
     }
     this.scene.traverse(object => {
@@ -599,7 +652,8 @@ export class SceneRenderer {
   /** ID objek di bawah pointer; ruangan hanya menjadi target setelah dipilih eksplisit. */
   hitId(event, {mode, roomIds}) {
     if (!this.ray(event)) return null;
-    const hits = this.raycaster.intersectObjects([...this.actorsGroup.children, this.cameraMarker, ...this.roomsGroup.children], true);
+    const hits = this.raycaster.intersectObjects([...this.actorsGroup.children, this.cameraMarker,
+      ...this.decorGroup.children, ...this.wallsGroup.children, ...this.roomsGroup.children], true);
     for (const hit of hits) {
       if (!hit.object.isMesh) continue;
       let object = hit.object, root = null, visible = true;
@@ -614,6 +668,10 @@ export class SceneRenderer {
       return root;
     }
     return null;
+  }
+  /** Titik lantai yang sedang menjadi pusat orbit observer — tempat menaruh objek baru. */
+  observerFocus() {
+    return {x: Math.round(this.controls.target.x * 10) / 10, z: Math.round(this.controls.target.z * 10) / 10};
   }
   cameraDebug() {
     return {

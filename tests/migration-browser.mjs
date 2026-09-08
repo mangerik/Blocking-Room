@@ -3,6 +3,7 @@
 import {chromium} from '@playwright/test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import {SCHEMA_VERSION} from '../src/schema.js';
 
 const v1 = name => readFileSync(new URL(`./fixtures/v1/${name}.json`, import.meta.url), 'utf8');
 const baseline = name => JSON.parse(readFileSync(new URL(`./fixtures/baseline/${name}.json`, import.meta.url), 'utf8'));
@@ -24,11 +25,13 @@ await page.evaluate(value => {localStorage.clear(); localStorage.setItem('blocki
 await page.reload();
 await page.waitForSelector('#viewport canvas');
 const doc = await document_();
-assert.equal(doc.schemaVersion, 2);
+// Fase 4b: rantai migrasi v1 → v2 → v3 dalam satu langkah buka.
+assert.equal(doc.schemaVersion, SCHEMA_VERSION);
 assert.equal(doc.scenes.length, 1);
 assert.equal(doc.scenes[0].shots.length, 1);
 assert.equal(doc.scenes[0].shots[0].duration, 10);
-assert.equal(doc.scenes[0].shots[0].tracks.length, 3);
+// v3: dua track per aktor (position + rotation) + satu track pose kamera.
+assert.equal(doc.scenes[0].shots[0].tracks.length, 2 * 2 + 1);
 assert.equal((await project()).title, 'Jalur berjalan');
 assert.equal(await stored('blocking-room.backup'), raw, 'sumber v1 harus dicadangkan sebelum ditimpa');
 // Fase 2: hasil migrasi tinggal di IndexedDB, bukan lagi di kunci localStorage.
@@ -38,7 +41,7 @@ assert.equal(await stored('blocking-room'), raw, 'sumber v1 tidak boleh ditimpa 
 assert.equal(await stored('blocking-room.migrated'), doc.id, 'penanda migrasi berisi id proyek hasil migrasi');
 assert.equal(await stored('blocking-room.activeProject'), doc.id);
 const persisted = await page.evaluate(() => window.blockingRoom.getStoredDocument());
-assert.equal(persisted.schemaVersion, 2, 'dokumen hasil migrasi tersimpan di IndexedDB');
+assert.equal(persisted.schemaVersion, SCHEMA_VERSION, 'dokumen hasil migrasi tersimpan di IndexedDB');
 assert.equal(persisted.id, doc.id);
 
 // Pose awal/tengah/akhir sama dengan golden Fase 0.
@@ -62,7 +65,7 @@ assert.equal(imported.rooms[1].visible, false);
 assert.equal(imported.camera.locked, true);
 assert.equal(imported.camera.target, 'a1');
 assert.equal(imported.camera.focal, 35);
-assert.equal((await document_()).schemaVersion, 2);
+assert.equal((await document_()).schemaVersion, SCHEMA_VERSION);
 
 // 3. Impor invalid tidak boleh mengubah dokumen aktif.
 const before = await document_();
@@ -94,5 +97,5 @@ await page.locator('[data-prop="name"]').press('Tab');
 assert.equal(await stored('blocking-room'), future, 'penyimpanan dinonaktifkan saat schema lebih baru');
 
 assert.deepEqual(errors, []);
-console.log('PASS: migrasi localStorage v1→v2, kesetaraan pose baseline, impor v1, impor invalid tidak menimpa, roundtrip v2, schema lebih baru tidak ditimpa.');
+console.log('PASS: migrasi localStorage v1→v2→v3, kesetaraan pose baseline, impor v1, impor invalid tidak menimpa, roundtrip v3, schema lebih baru tidak ditimpa.');
 await browser.close();

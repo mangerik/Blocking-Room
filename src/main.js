@@ -6,8 +6,8 @@ import { DocumentStore, cloneProjectDocument, addScene, duplicateScene, moveScen
 import { EditorSession, ReadOnlyError, partitionByLock, describeSkipped } from './commands.js';
 import { addShot, duplicateShot, moveShot, removeShot, renameShot, setShotSettings, compareShots } from './shots.js';
 import { TimelineWindow, rulerTicks, snapTime, frameOf, lastFrame, formatTimecode, indexAtTime, keyTolerance, moveKeys, copyKeys, pasteKeys, deleteKeys, describeReplaced, MIN_ZOOM, MAX_ZOOM } from './timeline-view.js';
-import { exportAsV1, openProjectData } from './migrate.js';
-import { SchemaTooNewError } from './schema.js';
+import { exportAsV1, exportAsV2, openProjectData } from './migrate.js';
+import { SchemaTooNewError, LIMITS, PROP_SHAPES, INTERPOLATIONS } from './schema.js';
 import { clearPendingDocument, setActiveProjectId, writePendingDocument } from './storage.js';
 import { DASHBOARD_ROUTE, projectRoute } from './routing.js';
 import { bootstrap } from './bootstrap.js';
@@ -19,7 +19,7 @@ import { capabilities } from './capabilities.js';
 import { readFlag } from './flags.js';
 import { metrics } from './metrics.js';
 import { ExportService } from './export-service.js';
-import { formatTime, trimTrackToDuration, aspectValue, aspectSize } from './timeline-engine.js';
+import { formatTime, trimTrackToDuration, aspectValue, aspectSize, sampleActor, refreshCombined } from './timeline-engine.js';
 import './style.css';
 const $=s=>document.querySelector(s),icon=n=>`<i data-lucide="${n}"></i>`,esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // Document state (schema v2) dipegang DocumentStore; editor bekerja pada scene view aktif.
@@ -48,6 +48,9 @@ let snapEnabled=true,safeArea=true,keySelection=[],keyClipboard=null,compareWith
 // F4-08: snap grid penataan set. Default MATI supaya perilaku geser lama tidak berubah
 // diam-diam; PRD SC-01 menuntut grid ini dapat dimatikan, jadi ia memang sebuah pilihan.
 let gridSnap=false;
+// F4-05/TL-02: track mana yang ditulis saat menyimpan keyframe aktor.
+let keyTarget='both';
+let propShape='box';
 const GRID_STEP=0.5;
 // Rekaman gerak adalah performance capture yang menerus; menguncinya ke grid akan
 // mematahkan langkah kaki, jadi grid sengaja tidak berlaku selama merekam.
@@ -60,12 +63,12 @@ const timelineWindow=new TimelineWindow(project.duration);
 $('#app').innerHTML=`
 <header><div class="header-left"><div class="brand"><div class="brand-mark">${icon('box')}</div><div>blocking room<small>A SPACE FOR YOUR NEXT SCENE</small></div></div><div class="header-divider"></div><nav class="breadcrumb" id="breadcrumb" aria-label="Lokasi proyek"><button class="crumb-link" id="crumb-dashboard">Semua proyek</button><span class="crumb-sep">/</span><b id="crumb-project"></b><span class="crumb-sep">/</span><span id="crumb-scene"></span><span class="crumb-sep">/</span><span id="crumb-shot"></span></nav></div><div class="header-actions"><button class="icon" id="back-dashboard" title="Kembali ke daftar proyek" aria-label="Kembali ke daftar proyek">${icon('arrow-left')}</button><button class="icon" id="undo" title="Undo (⌘/Ctrl Z)" aria-label="Undo" disabled>${icon('undo-2')}</button><button class="icon" id="redo" title="Redo (⌘/Ctrl Shift Z)" aria-label="Redo" disabled>${icon('redo-2')}</button><span class="saved" id="save-status" data-state="idle">Menyiapkan…</span><button class="icon" id="download-backup" title="Unduh cadangan JSON" aria-label="Unduh cadangan JSON" hidden>${icon('life-buoy')}</button><button class="icon" id="revisions" title="Riwayat versi tersimpan" aria-label="Riwayat versi tersimpan">${icon('history')}</button><button class="icon" id="metrics-open" title="Lihat metrik lokal" aria-label="Lihat metrik lokal">${icon('activity')}</button><button id="import">${icon('folder-open')}<span class="button-text">Buka</span></button><button id="save">${icon('download')}<span class="button-text">Simpan proyek</span></button><button class="primary" id="export">${icon('film')}<span>Ekspor video</span></button></div></header>
 <div class="project-bar"><div><div class="eyebrow" id="scene-eyebrow"></div><div class="title-line"><input class="project-title-input" aria-label="Judul proyek" id="project-title" maxlength="100" value="${esc(project.title)}"/><span class="badge">PRE-VISUALIZATION</span></div></div><div class="steps"><span class="current"><i>1</i> Tata scene</span><span>—</span><span><i>2</i> Atur gerakan</span><span>—</span><span><i>3</i> Jadikan referensi</span></div></div>
-<main class="studio"><aside class="left-panel"><div class="panel-heading">Scene explorer ${icon('layers')}</div><div class="section-caption"><span>SCENE DALAM PROYEK</span><span id="scene-total"></span></div><div class="scene-list" id="scene-list"></div><div class="scene-actions" id="scene-actions" aria-label="Aksi scene aktif"></div><button class="add-object" id="add-scene" aria-label="Tambah scene baru">${icon('plus')} Tambah scene</button><div class="panel-split"></div><div class="section-caption"><span>SHOT DALAM SCENE</span><span id="shot-total"></span></div><div class="shot-list" id="shot-list"></div><div class="scene-actions" id="shot-actions" aria-label="Aksi shot aktif"></div><button class="add-object" id="add-shot" aria-label="Tambah shot baru">${icon('plus')} Tambah shot</button><textarea class="scene-note shot-note" id="shot-notes" rows="2" maxlength="2000" aria-label="Catatan shot aktif" placeholder="Catatan shot ini…"></textarea><div class="shot-compare" id="shot-compare" hidden></div><div class="panel-split"></div><nav class="tabs" aria-label="Jenis objek"><button data-tab="actors" class="active">Karakter</button><button data-tab="rooms">Lokasi</button><button data-tab="camera">Kamera</button></nav><div class="section-caption"><span id="list-caption">KARAKTER DALAM SCENE</span><span id="object-count"></span></div><div class="object-list" id="objects"></div><button class="add-object" id="add-object" aria-label="Tambah objek ke scene">${icon('plus')} Tambah karakter</button><div class="left-bottom"><div class="eyebrow">DIRECTOR’S NOTE</div><textarea class="scene-note" id="scene-notes" rows="3" maxlength="2000" aria-label="Director’s note scene ini" placeholder="Catatan pengarahan untuk scene ini…"></textarea><div class="legend-row"><i></i><span id="scene-count"></span></div><button class="ghost small" id="help" style="margin:14px 0 0 -7px">${icon('circle-help')} Panduan singkat</button></div></aside>
+<main class="studio"><aside class="left-panel"><div class="panel-heading">Scene explorer ${icon('layers')}</div><div class="section-caption"><span>SCENE DALAM PROYEK</span><span id="scene-total"></span></div><div class="scene-list" id="scene-list"></div><div class="scene-actions" id="scene-actions" aria-label="Aksi scene aktif"></div><button class="add-object" id="add-scene" aria-label="Tambah scene baru">${icon('plus')} Tambah scene</button><div class="panel-split"></div><div class="section-caption"><span>SHOT DALAM SCENE</span><span id="shot-total"></span></div><div class="shot-list" id="shot-list"></div><div class="scene-actions" id="shot-actions" aria-label="Aksi shot aktif"></div><button class="add-object" id="add-shot" aria-label="Tambah shot baru">${icon('plus')} Tambah shot</button><textarea class="scene-note shot-note" id="shot-notes" rows="2" maxlength="2000" aria-label="Catatan shot aktif" placeholder="Catatan shot ini…"></textarea><div class="shot-compare" id="shot-compare" hidden></div><div class="panel-split"></div><nav class="tabs" aria-label="Jenis objek"><button data-tab="actors" class="active">Karakter</button><button data-tab="rooms">Lokasi</button><button data-tab="props">Props</button><button data-tab="camera">Kamera</button></nav><div class="section-caption"><span id="list-caption">KARAKTER DALAM SCENE</span><span id="object-count"></span></div><div class="object-list" id="objects"></div><div class="prop-add-row" id="prop-add-row" hidden><label class="field">Jenis<select id="prop-shape" aria-label="Jenis props yang ditambahkan"><option value="box">Box</option><option value="table">Meja</option><option value="chair">Kursi</option><option value="decor">Dekorasi</option><option value="wall">Dinding modular</option></select></label></div><button class="add-object" id="add-object" aria-label="Tambah objek ke scene">${icon('plus')} Tambah karakter</button><div class="left-bottom"><div class="eyebrow">DIRECTOR’S NOTE</div><textarea class="scene-note" id="scene-notes" rows="3" maxlength="2000" aria-label="Director’s note scene ini" placeholder="Catatan pengarahan untuk scene ini…"></textarea><div class="legend-row"><i></i><span id="scene-count"></span></div><button class="ghost small" id="help" style="margin:14px 0 0 -7px">${icon('circle-help')} Panduan singkat</button></div></aside>
 <section class="workarea" aria-label="Editor scene 3D"><div class="view-toolbar"><span class="view-title">${icon('box')} OBSERVER VIEW</span><div class="view-options"><button class="ghost active" data-view="perspective">Perspektif</button><button class="ghost" data-view="top">Atas</button><button class="ghost" data-view="camera">Kamera / final</button><button class="ghost" id="toggle-walls" title="Dinding transparan">${icon('scan')}<span>Dinding</span></button></div></div><div class="viewport" id="viewport"><div class="scene-labels" id="labels"></div></div><div class="tools-vertical"><button class="active" id="orbit-tool" title="Orbit scene (O)">${icon('mouse-pointer-2')}</button><button id="move-tool" title="Geser objek di lantai (G)">${icon('move')}</button><button id="rotate-tool" title="Putar karakter (R) — drag kiri/kanan">${icon('rotate-cw')}</button><button id="paths-tool" class="active" title="Tampilkan jalur gerakan" aria-label="Tampilkan jalur gerakan">${icon('route')}</button><button id="grid-tool" title="Snap ke grid 0,5 m (mati)" aria-label="Snap ke grid 0,5 m" aria-pressed="false">${icon('scan')}</button><button id="reset-view" title="Reset sudut pandang">${icon('focus')}</button></div><div class="viewport-hint"><kbd>Drag</kbd> Putar tampilan <span>·</span> <kbd>Scroll</kbd> Zoom <span>·</span> <kbd>G</kbd> Geser objek</div><div class="path-warning" id="path-warning" role="status" hidden></div><div class="compass">↗</div><div class="help-panel" hidden><h3>Dari blocking ke film.</h3><p><b>1. Tata scene.</b> Tambah karakter dan ruangan. Pilih objek lalu ubah posisinya di panel kanan.</p><p><b>2. Buat gerakan.</b> Geser playhead ke waktu tujuan, pindahkan objek dengan tool G atau input posisi. Keyframe tersimpan otomatis.</p><p><b>3. Preview & ekspor.</b> Tekan Space untuk memutar. Ekspor merekam sudut pandang Kamera A.</p><p><b>Rotasi:</b> R lalu drag karakter ke kiri/kanan, atau Q/E untuk putar 5°. Panah menggeser tanpa mengubah arah hadap. Semua bekerja di Kamera / final.</p><p><b>Lock & hide:</b> gunakan gembok dan mata di daftar objek. Lokasi terkunci secara default. Item tersembunyi juga tidak tampil di video; kamera hanya menyembunyikan penandanya.</p><p><b>Undo/redo:</b> ⌘/Ctrl Z dan ⌘/Ctrl Shift Z. Satu drag atau rekaman = satu langkah.</p><p><b>Rekam gerak:</b> aktifkan tombol rekam, lalu gunakan panah untuk bergerak dan Q/E untuk berputar.</p><button class="small" id="close-help">Mengerti</button></div><div class="export-progress" hidden><span id="export-label">Merekam video…</span><progress id="export-meter" max="100" value="0"></progress><button class="small ghost" id="cancel-export">Batalkan</button></div><div class="context-banner" id="context-banner" role="alert" hidden><b>Grafik 3D terputus</b><p id="context-banner-text">Browser melepas konteks WebGL (biasanya karena GPU sibuk, driver reset atau tab lama di latar). Data proyek tidak terpengaruh dan tetap tersimpan.</p><button class="primary" id="context-retry">Coba pulihkan tampilan</button></div></section>
 <aside class="right-panel"><div class="panel-heading">Camera & properties ${icon('sliders-horizontal')}</div><div class="camera-section"><div class="camera-title"><span>${icon('video')} <b id="camera-name-label">Kamera A</b></span><span class="live-dot">LIVE PREVIEW</span></div><div class="camera-frame" id="camera-preview"><div class="frame-guide"></div><div class="safe-area" id="safe-area"><i class="safe-action"></i><i class="safe-title"></i></div><div id="no-camera" hidden>Belum ada kamera<br><small>Tambah kamera melalui Scene explorer.</small></div><button class="preview-edit" id="edit-camera-view" title="Edit karakter pada sudut pandang kamera">Edit final view ↗</button></div><div class="camera-meta"><span id="lens-label">35 mm · Perspective</span><span id="format-label">16:9 · 24 fps</span><button class="ghost small active" id="toggle-safe" aria-pressed="true" title="Tampilkan safe area (action/title)" aria-label="Tampilkan safe area">Safe area</button></div></div><div class="inspector-title"><span id="inspector-name">Properti karakter</span><span class="eyebrow" id="inspector-kind">ACTOR</span></div><div class="inspector" id="inspector"></div></aside>
 <section class="timeline" aria-label="Timeline gerakan"><div class="timeline-head"><div class="transport"><button class="ghost icon small" id="rewind" title="Kembali ke awal">${icon('skip-back')}</button><button class="play" id="play" title="Putar / jeda (Space)">${icon('play')}</button><button class="ghost icon small" id="record" title="Rekam gerakan karakter dengan tombol panah">${icon('circle')}</button><span class="mode-cue" id="mode-cue" data-mode="edit" role="status" aria-live="polite">EDIT · f0</span><div class="timecode"><b id="time-display">00:00.0</b> <span id="total-display">/ 00:12</span></div></div><div class="duration"><span>Durasi</span><input id="duration" type="number" min="1" max="120" value="${project.duration}" aria-label="Durasi scene"/><span>dtk</span><select id="shot-fps" aria-label="fps shot" title="fps shot">${[12,24,25,30,50,60].map(f=>`<option value="${f}">${f} fps</option>`).join('')}</select><select id="shot-aspect" aria-label="Aspect ratio shot" title="Aspect ratio shot">${['16:9','9:16','2.39:1','4:3','1:1'].map(r=>`<option value="${r}">${r}</option>`).join('')}</select></div><div class="timeline-tools"><label class="frame-field"><span>Frame</span><input id="frame-input" type="number" min="0" step="1" value="0" aria-label="Nomor frame playhead"/></label><span class="smpte" id="timecode-display" title="Timecode menit:detik:frame">00:00:00</span><button class="ghost small active" id="snap-toggle" aria-pressed="true" title="Kunci ke frame (snapping)" aria-label="Kunci ke frame (snapping)">Snap</button><button class="ghost small" id="zoom-out" title="Perkecil timeline" aria-label="Perkecil timeline">−</button><span class="zoom-label" id="zoom-label">1×</span><button class="ghost small" id="zoom-in" title="Perbesar timeline" aria-label="Perbesar timeline">+</button><button class="ghost small" id="key-copy" title="Salin keyframe terpilih (Ctrl/⌘ C)" aria-label="Salin keyframe terpilih">Salin</button><button class="ghost small" id="key-paste" title="Tempel keyframe di playhead (Ctrl/⌘ V)" aria-label="Tempel keyframe di playhead">Tempel</button><button class="ghost small" id="key-delete" title="Hapus keyframe terpilih (Delete)" aria-label="Hapus keyframe terpilih">Hapus key</button><span class="key-count" id="key-count" role="status"></span></div></div><div class="timeline-body" id="timeline-body"><div class="ruler" id="ruler"></div><input class="scrub" type="range" min="0" max="${project.duration}" step="0.1" value="0" aria-label="Waktu timeline" id="scrub"/><div id="tracks"></div><div class="playhead" id="playhead"></div></div></section></main><div class="toast" role="status" id="toast"></div>
 <div class="tab-banner" id="tab-banner" role="alert" hidden><span id="tab-banner-text"></span><span class="tab-banner-actions"><button class="small" id="open-copy">Buka salinan</button><button class="small" id="take-over">Ambil alih</button></span></div>
-<div class="revision-dialog" id="revision-panel" role="dialog" aria-label="Riwayat versi tersimpan" hidden><div class="revision-head"><b>Riwayat versi</b><button class="ghost small" id="close-revisions">Tutup</button></div><div class="revision-list" id="revision-list"></div><button class="small" id="open-last-saved">Buka versi tersimpan terakhir</button><button class="small" id="export-v1">Unduh JSON v1 (build lama)</button><p class="hint">Snapshot dibuat otomatis saat menyimpan. Memulihkan versi menjadi satu langkah undo yang dapat dibatalkan.</p></div>
+<div class="revision-dialog" id="revision-panel" role="dialog" aria-label="Riwayat versi tersimpan" hidden><div class="revision-head"><b>Riwayat versi</b><button class="ghost small" id="close-revisions">Tutup</button></div><div class="revision-list" id="revision-list"></div><button class="small" id="open-last-saved">Buka versi tersimpan terakhir</button><button class="small" id="export-v2">Unduh JSON v2 (build R1)</button><button class="small" id="export-v1">Unduh JSON v1 (build lama)</button><p class="hint">Snapshot dibuat otomatis saat menyimpan. Memulihkan versi menjadi satu langkah undo yang dapat dibatalkan.</p></div>
 <div class="metrics-dialog" id="metrics-panel" role="dialog" aria-label="Metrik lokal" hidden><div class="metrics-head"><b>Metrik lokal</b><button class="ghost small" id="metrics-close">Tutup</button></div><p class="hint">Disimpan hanya di perangkat ini. Tidak memuat nama proyek, nama karakter maupun isi scene — lihat <code>src/metrics.js</code>.</p><div class="metrics-actions"><button class="small" id="metrics-export">Ekspor JSON</button><button class="small" id="metrics-clear">Hapus riwayat</button></div><div class="metrics-list" id="metrics-list"></div><label class="metrics-optin"><input type="checkbox" id="metrics-optin"/><span>Izinkan telemetry eksternal bila nanti tersedia. <b>Belum ada pengiriman apa pun</b> — pilihan ini hanya disimpan di perangkat ini.</span></label></div>
 <input type="file" accept=".json,application/json" id="file-input" hidden/>`;
 const refreshIcons=()=>createIcons({icons});
@@ -126,7 +129,7 @@ function restoreHistory(direction){
   const next=session[direction]();if(!next)return;
   metrics.record('history_used',{direction,depth:session.history.entries.length});
   project=next;time=Math.min(time,project.duration);
-  if(![...project.actors,...project.rooms,project.camera].filter(Boolean).some(o=>o.id===selected))selected=project.actors[0]?.id||'camera';
+  if(![...project.actors,...project.rooms,...setPieces(),project.camera].filter(Boolean).some(o=>o.id===selected))selected=project.actors[0]?.id||'camera';
   tab=kind();$('#project-title').value=project.title;
   persist(false);syncCameraUI();if(!project.camera&&view==='camera')resetView();renderTabs();rebuild();
 }
@@ -138,14 +141,62 @@ function editable(o=objectData()){return !exporting&&o&&!o.locked&&o.visible!==f
 // `src/model.js` sengaja dibiarkan apa adanya karena ia bagian dari model v1.
 function shotFps(){return store.shot?.fps??24;}
 function snapT(t){return snapTime(t,{fps:shotFps(),duration:project.duration,snap:snapEnabled});}
-function setKey(keys,pose,t){
-  const fps=shotFps(),key={...pose,t:snapT(t)};
-  const i=indexAtTime(keys,key.t,fps);
-  if(i>=0)keys[i]=key;else keys.push(key);
-  keys.sort((a,b)=>a.t-b.t);
+// ---------- F4-05 (TL-02): dua track independen per aktor ----------
+// Aktor scene view membawa `position` ({t,x,z}) dan `rotation` ({t,r}) yang berdiri
+// sendiri; `actor.keys` gabungan hanyalah CACHE turunan untuk hal-hal yang bekerja
+// pada jalur gerak (jalur viewport, langkah kaki, peringatan tembus dinding).
+// Kamera tetap memakai satu track `pose` — arah pandang dan posisi kamera adalah
+// satu gerak, dan memecahnya tidak diminta TL-02.
+const TRACK_LABEL={position:'Posisi',rotation:'Orientasi',pose:'Kamera'};
+const INTERPOLATION_LABEL={linear:'Linear',hold:'Hold',ease:'Ease'};
+/** ID lane timeline: `<objectId>#<property>` untuk aktor, `<cameraId>` untuk kamera. */
+const laneId=(id,property)=>`${id}#${property}`;
+const ownerOf=id=>String(id).split('#')[0];
+/** Menyegarkan cache `keys` gabungan seluruh aktor scene view. */
+function syncKeys(){for(const a of project.actors)refreshCombined(a);}
+/** Menulis satu keyframe ke sebuah track (ganti bila waktunya sama). */
+function putTrackKey(track,values,time,fps){
+  const key={...values,t:time};
+  const i=indexAtTime(track.keys,time,fps);
+  if(i>=0)track.keys[i]=key;else track.keys.push(key);
+  track.keys.sort((a,b)=>a.t-b.t);
 }
-/** Objek yang memiliki track pada shot aktif (aktor + kamera shot). */
-function keyObjects(){return [...project.actors,...(project.camera?[project.camera]:[])];}
+/**
+ * Menyimpan pose sebagai keyframe pada objek `o`.
+ * `tracks` menentukan track aktor mana yang ditulis: 'both' | 'position' | 'rotation'.
+ * Kamera selalu menulis track pose-nya.
+ */
+function setKey(o,pose,t,tracks='both'){
+  const fps=shotFps(),time=snapT(t);
+  if(o.position&&o.rotation){
+    if(tracks!=='rotation')putTrackKey(o.position,{x:pose.x,z:pose.z},time,fps);
+    if(tracks!=='position')putTrackKey(o.rotation,{r:pose.r},time,fps);
+    refreshCombined(o);
+  }else putTrackKey(o,{...pose},time,fps);
+}
+/** Pose objek pada waktu tertentu (aktor memakai dua track, kamera track pose). */
+const poseAt=(o,t)=>(o?.position&&o?.rotation?sampleActor(o,t):sample(o.keys,t));
+/**
+ * "Lane" timeline: pembungkus tipis sebuah track dengan metadata tampilan.
+ * Sengaja BUKAN `Object.assign` ke track aslinya — scene view tidak boleh ikut
+ * membawa field tampilan. Getter/setter meneruskan tulisan ke track sebenarnya,
+ * sehingga operasi keyframe massal (`timeline-view.js`) tetap memutasi dokumen.
+ */
+function lane(owner,track,property,name){
+  return {
+    id:property==='pose'?owner.id:laneId(owner.id,property),ownerId:owner.id,property,name,
+    color:owner.color,locked:owner.locked,visible:owner.visible,
+    get keys(){return track.keys;},set keys(value){track.keys=value;},
+    get interpolation(){return track.interpolation??'linear';},set interpolation(value){track.interpolation=value;},
+  };
+}
+const actorLanes=a=>['position','rotation'].map(property=>lane(a,a[property],property,`${a.name} · ${TRACK_LABEL[property]}`));
+/** Lane yang memiliki track pada shot aktif (dua per aktor + kamera shot). */
+function keyObjects(){
+  const lanes=project.actors.flatMap(actorLanes);
+  if(project.camera)lanes.push(lane(project.camera,project.camera,'pose',project.camera.name));
+  return lanes;
+}
 const isKeySelected=(id,t)=>keySelection.some(s=>s.id===id&&Math.abs(s.t-t)<keyTolerance(shotFps()));
 function toggleKeySelection(id,t){
   const i=keySelection.findIndex(s=>s.id===id&&Math.abs(s.t-t)<keyTolerance(shotFps()));
@@ -155,9 +206,9 @@ function download(blob,name){const url=URL.createObjectURL(blob),a=document.crea
 // SceneRenderer memiliki seluruh batas Three.js; main.js hanya memberi scene view dan waktu.
 const renderer3d=new SceneRenderer({viewport:$('#viewport'),labelLayer:$('#labels'),povContainer:$('#camera-preview')});
 const exportService=new ExportService({canvas:renderer3d.povCanvas});
-function buildScene(){renderer3d.selected=selected;renderer3d.build(project,time);}
-function buildPaths(){renderer3d.buildPaths(project);}
-function updateScene(){renderer3d.selected=selected;renderer3d.update(project,time);}
+function buildScene(){syncKeys();renderer3d.selected=selected;renderer3d.build(project,time);}
+function buildPaths(){syncKeys();renderer3d.buildPaths(project);}
+function updateScene(){syncKeys();renderer3d.selected=selected;renderer3d.update(project,time);}
 function setView(next){view=next;renderer3d.viewMode=next;}
 function resize(){renderer3d.resize();updateTimeUI();}
 // F6-05: konteks WebGL dapat hilang kapan saja. Pemulihan membangun ulang scene dari
@@ -182,12 +233,20 @@ if(!caps.mediaRecorder.supported||!caps.mediaRecorder.preferred){
   button.setAttribute('aria-label',button.title);
 }
 new ResizeObserver(resize).observe($('#viewport'));
-function objectData(){return project.actors.find(a=>a.id===selected)||project.rooms.find(r=>r.id===selected)||project.camera;}
-function kind(){return project.actors.some(a=>a.id===selected)?'actors':project.rooms.some(r=>r.id===selected)?'rooms':'camera';}
+/** Prop dan dinding modular berbagi satu tab; keduanya objek set ber-ID (F4-07/F4-08). */
+function setPieces(){return [...(project.props??[]),...(project.walls??[])];}
+function objectData(){return project.actors.find(a=>a.id===selected)||project.rooms.find(r=>r.id===selected)||setPieces().find(o=>o.id===selected)||project.camera;}
+function kind(){return project.actors.some(a=>a.id===selected)?'actors':project.rooms.some(r=>r.id===selected)?'rooms':setPieces().some(o=>o.id===selected)?'props':'camera';}
+/** Daftar yang ditampilkan pada sebuah tab. */
+function tabItems(t=tab){return t==='camera'?(project.camera?[project.camera]:[]):t==='props'?setPieces():project[t];}
 function renderList(){
- const items=tab==='camera'?(project.camera?[project.camera]:[]):project[tab];
- $('#objects').innerHTML=items.map(o=>`<div class="object-row ${selected===o.id?'selected':''} ${o.visible===false?'is-hidden':''}"><button class="object" data-select="${esc(o.id)}"><span class="swatch" style="--c:${o.color||'#65775d'}">${icon(tab==='actors'?'person-standing':tab==='rooms'?'cuboid':'video')}</span><span><strong>${esc(o.name)}</strong><small>${tab==='actors'?`${o.height.toFixed(2)} m · ${o.keys.length} keyframe`:tab==='rooms'?`${o.w} × ${o.d} m`:`${o.focal} mm · ${o.keys.length} keyframe`}</small></span></button><div class="object-actions"><button class="ghost icon ${o.locked?'locked':''}" data-lock="${esc(o.id)}" aria-label="${o.locked?'Buka kunci':'Kunci'} ${esc(o.name)}" title="${o.locked?'Buka kunci':'Kunci'} ${esc(o.name)}" aria-pressed="${!!o.locked}">${icon(o.locked?'lock-keyhole':'lock-keyhole-open')}</button><button class="ghost icon" data-visible="${esc(o.id)}" aria-label="${o.visible===false?'Tampilkan':'Sembunyikan'} ${esc(o.name)}" title="${tab==='camera'?'Tampilkan/sembunyikan penanda kamera':o.visible===false?'Tampilkan di scene dan video':'Sembunyikan dari scene dan video'}" aria-pressed="${o.visible!==false}">${icon(o.visible===false?'eye-off':'eye')}</button><button class="ghost icon" data-delete="${esc(o.id)}" title="Hapus ${esc(o.name)}" aria-label="Hapus ${esc(o.name)}" ${o.locked?'disabled':''}>${icon('trash-2')}</button></div></div>`).join('');
- $('#object-count').textContent=String(items.length).padStart(2,'0');$('#list-caption').textContent={actors:'KARAKTER DALAM SCENE',rooms:'ZONA & RUANGAN',camera:'SCENE CAMERA'}[tab];$('#add-object').hidden=tab==='camera'&&!!project.camera;$('#add-object').innerHTML=icon('plus')+(tab==='actors'?' Tambah karakter':tab==='camera'?' Tambah kamera':' Tambah ruangan');$('#add-object').setAttribute('aria-label',tab==='actors'?'Tambah karakter':tab==='camera'?'Tambah kamera':'Tambah ruangan');$('#scene-count').textContent=`${project.rooms.length} lokasi · ${project.actors.length} karakter · ${project.camera?1:0} kamera`;
+ const items=tabItems();
+ $('#objects').innerHTML=items.map(o=>`<div class="object-row ${selected===o.id?'selected':''} ${o.visible===false?'is-hidden':''}"><button class="object" data-select="${esc(o.id)}"><span class="swatch" style="--c:${o.color||'#65775d'}">${icon(tab==='actors'?'person-standing':tab==='rooms'?'cuboid':tab==='props'?(o.type==='wall'?'scan':'box'):'video')}</span><span><strong>${esc(o.name)}</strong><small>${tab==='actors'?`${o.height.toFixed(2)} m · ${o.position.keys.length} posisi / ${o.rotation.keys.length} orientasi`:tab==='rooms'?`${o.w} × ${o.d} m`:tab==='props'?(o.type==='wall'?`dinding ${o.length} m · ${o.height} m`:`${{box:'Box',table:'Meja',chair:'Kursi',decor:'Dekorasi'}[o.shape]??o.shape} · ${o.w} × ${o.d} m`):`${o.focal} mm · ${o.keys.length} keyframe`}</small></span></button><div class="object-actions"><button class="ghost icon ${o.locked?'locked':''}" data-lock="${esc(o.id)}" aria-label="${o.locked?'Buka kunci':'Kunci'} ${esc(o.name)}" title="${o.locked?'Buka kunci':'Kunci'} ${esc(o.name)}" aria-pressed="${!!o.locked}">${icon(o.locked?'lock-keyhole':'lock-keyhole-open')}</button><button class="ghost icon" data-visible="${esc(o.id)}" aria-label="${o.visible===false?'Tampilkan':'Sembunyikan'} ${esc(o.name)}" title="${tab==='camera'?'Tampilkan/sembunyikan penanda kamera':o.visible===false?'Tampilkan di scene dan video':'Sembunyikan dari scene dan video'}" aria-pressed="${o.visible!==false}">${icon(o.visible===false?'eye-off':'eye')}</button><button class="ghost icon" data-delete="${esc(o.id)}" title="Hapus ${esc(o.name)}" aria-label="Hapus ${esc(o.name)}" ${o.locked?'disabled':''}>${icon('trash-2')}</button></div></div>`).join('');
+ $('#object-count').textContent=String(items.length).padStart(2,'0');$('#list-caption').textContent={actors:'KARAKTER DALAM SCENE',rooms:'ZONA & RUANGAN',props:'PROPS & DINDING MODULAR',camera:'SCENE CAMERA'}[tab];$('#add-object').hidden=tab==='camera'&&!!project.camera;
+ const addLabel=tab==='actors'?'Tambah karakter':tab==='camera'?'Tambah kamera':tab==='props'?`Tambah ${{box:'box',table:'meja',chair:'kursi',decor:'dekorasi',wall:'dinding modular'}[propShape]}`:'Tambah ruangan';
+ $('#add-object').innerHTML=icon('plus')+' '+addLabel;$('#add-object').setAttribute('aria-label',addLabel);
+ $('#prop-add-row').hidden=tab!=='props';if($('#prop-shape')){$('#prop-shape').value=propShape;$('#prop-shape').onchange=e=>{propShape=e.target.value;renderList();};}
+ $('#scene-count').textContent=`${project.rooms.length} lokasi · ${project.actors.length} karakter · ${setPieces().length} props · ${project.camera?1:0} kamera`;
  document.querySelectorAll('[data-select]').forEach(b=>b.onclick=()=>select(b.dataset.select));
  for(const [attribute,property] of [['lock','locked'],['visible','visible']])document.querySelectorAll(`[data-${attribute}]`).forEach(b=>b.onclick=()=>{
    if(exporting||recording)return;pause();finishKeyboardGesture();const o=items.find(o=>o.id===b.dataset[attribute]);o[property]=!o[property];changed();
@@ -198,43 +257,88 @@ $('#inspector').addEventListener('focusin',()=>{if(playing&&!recording&&!exporti
 const field=(label,content)=>`<label class="field">${label}${content}</label>`;
 const num=(key,value,min=-100,max=100,step=.1)=>`<input type="number" data-prop="${key}" value="${Math.round(value*100)/100}" min="${min}" max="${max}" step="${step}" aria-label="${key}"/>`;
 const axes=(keys,pose)=>`<div class="input-row ${keys.length===2?'two':''}">${keys.map(k=>`<div class="axis-field"><span>${k.toUpperCase()}</span>${num(k,pose[k])}</div>`).join('')}</div>`;
-function renderInspector(){const o=objectData();if(!o){$('#inspector-name').textContent='Belum ada kamera';$('#inspector-kind').textContent='CAMERA';$('#inspector').innerHTML='<p class="hint">Kamera telah dihapus. Pilih Tambah kamera untuk membuat kamera baru, atau Undo untuk memulihkannya. Ekspor memerlukan kamera.</p>';return;}const k=kind(),p=o.keys?sample(o.keys,time):o;$('#inspector-name').textContent=o.name;$('#inspector-kind').textContent={actors:'CHARACTER',rooms:'LOCATION',camera:'CAMERA A'}[k];let html=(o.locked?'<p class="object-notice">Objek terkunci. Buka gembok di daftar untuk mengedit.</p>':o.visible===false?'<p class="object-notice">Objek tersembunyi. Tampilkan kembali untuk mengedit.</p>':'')+field('Nama',`<input data-prop="name" maxlength="100" value="${esc(o.name)}"/>`);
+function renderInspector(){const o=objectData();if(!o){$('#inspector-name').textContent='Belum ada kamera';$('#inspector-kind').textContent='CAMERA';$('#inspector').innerHTML='<p class="hint">Kamera telah dihapus. Pilih Tambah kamera untuk membuat kamera baru, atau Undo untuk memulihkannya. Ekspor memerlukan kamera.</p>';return;}const k=kind(),p=o.keys?poseAt(o,time):o;$('#inspector-name').textContent=o.name;$('#inspector-kind').textContent={actors:'CHARACTER',rooms:'LOCATION',camera:'CAMERA A'}[k];let html=(o.locked?'<p class="object-notice">Objek terkunci. Buka gembok di daftar untuk mengedit.</p>':o.visible===false?'<p class="object-notice">Objek tersembunyi. Tampilkan kembali untuk mengedit.</p>':'')+field('Nama',`<input data-prop="name" maxlength="100" value="${esc(o.name)}"/>`);
  if(k==='actors'){html+=field('Warna penanda',`<div class="color-row">${palette.map(c=>`<button class="color-choice ${o.color===c?'chosen':''}" data-color="${c}" style="--c:${c}" title="Warna ${c}" aria-label="Warna ${c}"></button>`).join('')}</div>`)+`<div class="divider"></div>`+field('Posisi di lantai · meter',axes(['x','z'],p))+`<div class="input-row two">${field('Rotasi · derajat',num('r',p.r,-360,360,5))}${field('Tinggi · meter',num('height',o.height,.5,3,.01))}</div><div class="rotation-actions"><button class="small" data-turn="-15">↶ −15°</button><button class="small" data-turn="15">↷ +15°</button><button class="small" id="face-camera">Hadap kamera</button></div><p class="hint">0° → +Z · 90° → +X. Q/E untuk putar; panah untuk geser. Arah hadap tetap saat bergeser.</p>`;}
  if(k==='rooms'){html+=field('Posisi pusat · meter',axes(['x','z'],o))+`<div class="input-row two">${field('Lebar · m',num('w',o.w,1,40))}${field('Panjang · m',num('d',o.d,1,40))}</div>`+field('Tinggi dinding · m',num('h',o.h,1,10))+field('Warna ruangan',`<input type="color" data-prop="color" value="${o.color}"/>`);}
+ if(k==='props'&&o.type==='prop'){html+=field('Bentuk',`<select data-prop="shape">${PROP_SHAPES.map(sh=>`<option value="${sh}" ${o.shape===sh?'selected':''}>${{box:'Box',table:'Meja',chair:'Kursi',decor:'Dekorasi'}[sh]}</option>`).join('')}</select>`)
+   +field('Posisi di lantai · meter',axes(['x','z'],o))
+   +`<div class="input-row two">${field('Tinggi dari lantai · m',num('y',o.y,0,10,.05))}${field('Rotasi · derajat',num('r',o.r,-360,360,5))}</div>`
+   +`<div class="input-row">${['w','d','h'].map(key=>field(`${{w:'Lebar',d:'Panjang',h:'Tinggi'}[key]} · m`,num(key,o[key],.05,40,.05))).join('')}</div>`
+   +field('Warna',`<input type="color" data-prop="color" value="${o.color}"/>`)
+   +`<p class="hint">Props adalah objek ber-ID: transform, lock, hide, duplikasi dan hapus memakai jalur perintah yang sama dengan karakter dan ruangan. Snap grid viewport juga berlaku.</p>`;}
+ if(k==='props'&&o.type==='wall'){html+=field('Posisi pusat · meter',axes(['x','z'],o))
+   +`<div class="input-row two">${field('Panjang · m',num('length',o.length,.2,40,.1))}${field('Rotasi · derajat',num('r',o.r,-360,360,5))}</div>`
+   +`<div class="input-row two">${field('Tinggi · m',num('height',o.height,.2,10,.1))}${field('Tebal · m',num('thickness',o.thickness,.02,2,.02))}</div>`
+   +field('Warna',`<input type="color" data-prop="color" value="${o.color}"/>`)
+   +`<p class="hint">0° membentang searah +Z, 90° searah +X. Jalur karakter yang menembus segmen ini menjadi <b>peringatan</b>, bukan tabrakan fisik. Pintu ruangan tidak terpengaruh.</p>`;}
  if(k==='camera'){html+=field('Posisi kamera · meter',axes(['x','y','z'],p))+field('Lensa · focal length',`<select data-prop="focal">${[14,18,24,35,50,85,120].map(f=>`<option value="${f}" ${o.focal===f?'selected':''}>${f} mm${f===35?' — Natural':f===24?' — Wide':f===85?' — Portrait':''}</option>`).join('')}</select>`)+field('Arah pandang',`<select data-prop="target"><option value="">Titik manual</option>${project.actors.map(a=>`<option value="${esc(a.id)}" ${o.target===a.id?'selected':''}>Ikuti ${esc(a.name)}</option>`).join('')}</select>`);html+=`<div class="lens-presets" role="group" aria-label="Preset lensa">${[[18,'Wide'],[35,'Normal'],[85,'Tele']].map(([f,l])=>`<button class="small ${o.focal===f?'active':''}" data-lens="${f}" aria-pressed="${o.focal===f}" title="Preset ${l} ${f} mm">${l} · ${f} mm</button>`).join('')}</div>`;
   if(!o.target)html+=field('Titik pandang · X / Y / Z',`<div class="input-row">${['tx','ty','tz'].map(f=>num(f,p[f])).join('')}</div>`);
   html+=`<button class="ghost small" id="focal-key">${icon('diamond')} Keyframe lensa di frame ${frameOf(snapT(time),shotFps())}</button><p class="hint">${o.keys.some(k=>k.focal!==undefined)?`Lensa sudah di-key; nilai aktif ${Math.round(p.focal??o.focal)} mm.`:'Arah pandang “Ikuti karakter” adalah target lock; “Titik manual” memakai keyframe tx/ty/tz.'}</p>`;}
  if(k==='rooms')html+=`<div class="divider"></div><div class="eyebrow">Pintu / bukaan dinding</div><p class="hint">Dinding belakang berada di −Z, dinding kiri di −X. Posisi pintu dihitung dari pusat dinding.</p>${(o.doors||[]).map((d,i)=>`<div class="door-editor"><label class="field">Dinding<select data-door="${i}" data-door-prop="wall"><option value="back" ${d.wall==='back'?'selected':''}>Belakang (−Z)</option><option value="left" ${d.wall==='left'?'selected':''}>Kiri (−X)</option></select></label><div class="input-row">${[['offset','Posisi'],['width','Lebar'],['height','Tinggi']].map(([key,label])=>`<label class="field">${label} · m<input type="number" step="0.1" data-door="${i}" data-door-prop="${key}" value="${d[key]}" aria-label="Pintu ${i+1} ${label}"/></label>`).join('')}</div><button class="ghost small" data-remove-door="${i}">Hapus pintu</button></div>`).join('')}<button class="small" id="add-door" ${(o.doors||[]).length>=2?'disabled':''}>${icon('plus')} Tambah pintu</button><p class="hint">Bukaan selalu terbuka. Arahkan jalur karakter melalui pintu; pintu tidak otomatis mengubah jalur.</p>`;
- if(k!=='rooms')html+=`<button class="key-btn" id="add-key">${icon('diamond')} Simpan keyframe di ${time.toFixed(1)}s</button><p class="hint">Pindahkan playhead, lalu ubah posisi. Perubahan otomatis menjadi keyframe.</p><button class="ghost small" id="remove-key">${icon('minus')} Hapus keyframe saat ini</button>`;
- html+=`<button class="ghost delete-btn" id="delete-object">${icon('trash-2')} Hapus ${k==='actors'?'karakter':k==='camera'?'kamera':'ruangan'}</button>`;
- $('#inspector').innerHTML=html;document.querySelectorAll('#inspector input,#inspector select,#inspector button').forEach(el=>el.disabled=!editable(o)||recording);document.querySelectorAll('[data-turn]').forEach(b=>b.onclick=()=>rotateSelected(Number(b.dataset.turn)));if($('#face-camera'))$('#face-camera').onclick=()=>{if(!editable())return;const pose=sample(o.keys,time),cam=renderer3d.camera.position;rotateSelected(Math.atan2(cam.x-pose.x,cam.z-pose.z)*180/Math.PI-pose.r);};$('#lens-label').textContent=`${project.camera?.focal||'—'} mm · Perspective`;refreshIcons();
+ if(k==='props')html+=`<button class="ghost small" id="duplicate-object">${icon('copy')} Duplikasi ${o.type==='wall'?'dinding':'props'}</button>`;
+ if(k==='actors')html+=`<div class="divider"></div><div class="eyebrow">TRACK KEYFRAME</div><div class="key-target" role="group" aria-label="Track yang ditulis saat menyimpan keyframe">${[['both','Posisi + orientasi'],['position','Posisi saja'],['rotation','Orientasi saja']].map(([value,label])=>`<button class="small ${keyTarget===value?'active':''}" data-key-target="${value}" aria-pressed="${keyTarget===value}">${label}</button>`).join('')}</div><div class="input-row two">${['position','rotation'].map(prop=>field(`Interpolasi ${TRACK_LABEL[prop].toLowerCase()}`,`<select data-interpolation="${prop}">${INTERPOLATIONS.map(i=>`<option value="${i}" ${o[prop].interpolation===i?'selected':''}>${INTERPOLATION_LABEL[i]}</option>`).join('')}</select>`)).join('')}</div><p class="hint">Rotasi selalu mengambil jalur terpendek; putaran penuh &gt;360° belum didukung (D-06).</p>`;
+ if(k!=='rooms'&&k!=='props')html+=`<button class="key-btn" id="add-key">${icon('diamond')} Simpan keyframe di ${time.toFixed(1)}s</button><p class="hint">Pindahkan playhead, lalu ubah posisi. Perubahan otomatis menjadi keyframe.</p><button class="ghost small" id="remove-key">${icon('minus')} Hapus keyframe saat ini</button>`;
+ html+=`<button class="ghost delete-btn" id="delete-object">${icon('trash-2')} Hapus ${k==='actors'?'karakter':k==='camera'?'kamera':k==='props'?(o.type==='wall'?'dinding':'props'):'ruangan'}</button>`;
+ $('#inspector').innerHTML=html;document.querySelectorAll('#inspector input,#inspector select,#inspector button').forEach(el=>el.disabled=!editable(o)||recording);document.querySelectorAll('[data-turn]').forEach(b=>b.onclick=()=>rotateSelected(Number(b.dataset.turn)));if($('#face-camera'))$('#face-camera').onclick=()=>{if(!editable())return;const pose=poseAt(o,time),cam=renderer3d.camera.position;rotateSelected(Math.atan2(cam.x-pose.x,cam.z-pose.z)*180/Math.PI-pose.r);};$('#lens-label').textContent=`${project.camera?.focal||'—'} mm · Perspective`;refreshIcons();
  if($('#add-door')){const room=o;$('#add-door').disabled=!editable(o)||recording||(o.doors||[]).length>=2;
    $('#add-door').onclick=()=>{if(!editable(room))return;const wall=room.doors?.some(d=>d.wall==='back')?'left':'back';const span=wall==='back'?room.w:room.d;const door={wall,offset:0,width:Math.min(1.4,span-.2),height:Math.min(2.2,room.h-.1)};room.doors??=[];room.doors.push(door);if(!validDoors(room)){room.doors.pop();notify('Ruangan terlalu kecil untuk pintu.');return;}changed();};
    document.querySelectorAll('[data-door]').forEach(el=>el.onchange=()=>{if(!editable(room))return;const doors=structuredClone(room.doors),door=doors[Number(el.dataset.door)],key=el.dataset.doorProp;door[key]=key==='wall'?el.value:Number(el.value);if(!validDoors({...room,doors})){notify('Pintu harus berada di dalam dinding; satu pintu per dinding.');renderInspector();return;}room.doors=doors;changed();});
    document.querySelectorAll('[data-remove-door]').forEach(b=>b.onclick=()=>{if(!editable(room))return;room.doors.splice(Number(b.dataset.removeDoor),1);changed();});
  }
  document.querySelectorAll('[data-prop]').forEach(el=>el.onchange=()=>{if(!editable(o)||recording)return;const key=el.dataset.prop;let value=el.type==='number'||key==='focal'?Number(el.value):el.value;if(el.type==='number'&&(!Number.isFinite(value)||value<Number(el.min)||value>Number(el.max))){notify('Nilai di luar rentang yang diperbolehkan.');renderInspector();return;}if(key==='name'){value=value.trim();if(!value){renderInspector();return;}}
- if(k==='rooms'&&['w','d','h'].includes(key)&&!validDoors({...o,[key]:value})){notify('Ukuran baru tidak cukup untuk pintu. Atur pintu dahulu.');renderInspector();return;}if(o.keys&&['x','y','z','r','tx','ty','tz'].includes(key)){setKey(o.keys,{...sample(o.keys,time),[key]:value},time);}else o[key]=value;persist();metrics.record('editor_command',{command_type:key==='name'?'rename':o.keys&&['x','y','z','r','tx','ty','tz'].includes(key)?'keyframe':'property',source:'inspector',affected_count:1});syncCameraUI();buildScene();renderList();renderTimeline();renderInspector();});
+ if(k==='rooms'&&['w','d','h'].includes(key)&&!validDoors({...o,[key]:value})){notify('Ukuran baru tidak cukup untuk pintu. Atur pintu dahulu.');renderInspector();return;}if(o.keys&&['x','y','z','r','tx','ty','tz'].includes(key)){setKey(o,{...poseAt(o,time),[key]:value},time,o.position?(key==='r'?'rotation':'position'):'both');}else o[key]=value;persist();metrics.record('editor_command',{command_type:key==='name'?'rename':o.keys&&['x','y','z','r','tx','ty','tz'].includes(key)?'keyframe':'property',source:'inspector',affected_count:1});syncCameraUI();buildScene();renderList();renderTimeline();renderInspector();});
  document.querySelectorAll('[data-lens]').forEach(el=>el.onclick=()=>{if(!editable(o)||recording)return;o.focal=Number(el.dataset.lens);
    // Bila lensa sudah di-key, preset ikut menulis keyframe pada playhead — kalau tidak,
    // nilai hasil sampling akan langsung menutupi pilihan pengguna.
-   if(o.keys?.some(k=>k.focal!==undefined))setKey(o.keys,{...sample(o.keys,time),focal:o.focal},time);
+   if(o.keys?.some(k=>k.focal!==undefined))setKey(o,{...sample(o.keys,time),focal:o.focal},time);
    persist();metrics.record('editor_command',{command_type:'camera_preset',source:'inspector',affected_count:1});syncCameraUI();buildScene();rebuild();});
  if($('#focal-key'))$('#focal-key').onclick=()=>{if(!editable(o)||recording)return;
    // Interpolasi memerlukan field yang sama pada semua keyframe; tanpa ini `sample`
    // menghasilkan NaN begitu satu keyframe memiliki `focal` dan yang lain tidak.
    for(const key of o.keys)if(key.focal===undefined)key.focal=o.focal;
-   setKey(o.keys,{...sample(o.keys,time),focal:o.focal},time);
+   setKey(o,{...sample(o.keys,time),focal:o.focal},time);
    persist();metrics.record('editor_command',{command_type:'focal_key',source:'inspector',affected_count:1});
    notify(`Keyframe lensa ${o.focal} mm disimpan pada frame ${frameOf(snapT(time),shotFps())}.`);rebuild();};
  document.querySelectorAll('[data-color]').forEach(el=>el.onclick=()=>{if(!editable(o)||recording)return;o.color=el.dataset.color;persist();syncCameraUI();buildScene();renderInspector();renderList();renderTimeline();});
- if($('#add-key'))$('#add-key').onclick=()=>{if(!editable(o)||recording)return;setKey(o.keys,sample(o.keys,time),time);changed();notify(`Keyframe disimpan pada ${time.toFixed(1)} detik.`);};
- if($('#remove-key'))$('#remove-key').onclick=()=>{if(!editable(o)||recording)return;const i=indexAtTime(o.keys,snapT(time),shotFps());if(i<0){notify('Tidak ada keyframe pada waktu ini.');return;}if(o.keys.length===1){notify('Objek memerlukan setidaknya satu keyframe.');return;}o.keys.splice(i,1);changed();};
+ if($('#add-key'))$('#add-key').onclick=()=>{if(!editable(o)||recording)return;setKey(o,poseAt(o,time),time,keyTarget);changed();notify(`Keyframe ${o.position?{both:'posisi + orientasi',position:'posisi',rotation:'orientasi'}[keyTarget]:'kamera'} disimpan pada frame ${frameOf(snapT(time),shotFps())}.`);};
+ document.querySelectorAll('[data-key-target]').forEach(b=>b.onclick=()=>{keyTarget=b.dataset.keyTarget;renderInspector();});
+ if($('#remove-key'))$('#remove-key').onclick=()=>{if(!editable(o)||recording)return;
+   const fps=shotFps(),at=snapT(time);
+   const targets=o.position?(keyTarget==='both'?[o.position,o.rotation]:[o[keyTarget]]):[o];
+   const hit=targets.filter(track=>indexAtTime(track.keys,at,fps)>=0);
+   if(!hit.length){notify('Tidak ada keyframe pada waktu ini.');return;}
+   const kept=hit.filter(track=>track.keys.length===1);
+   const removable=hit.filter(track=>track.keys.length>1);
+   if(!removable.length){notify('Setiap track memerlukan minimal satu keyframe.');return;}
+   for(const track of removable)track.keys.splice(indexAtTime(track.keys,at,fps),1);
+   if(o.position)refreshCombined(o);
+   changed();
+   notify(kept.length?'Keyframe dihapus; satu track dipertahankan karena hanya punya satu keyframe.':'Keyframe dihapus.');};
+ document.querySelectorAll('[data-interpolation]').forEach(el=>el.onchange=()=>{if(!editable(o)||recording)return;
+   const property=el.dataset.interpolation;o[property].interpolation=el.value;refreshCombined(o);
+   persist();metrics.record('editor_command',{command_type:'track_interpolation',source:'inspector',affected_count:1});
+   notify(`Interpolasi ${TRACK_LABEL[property].toLowerCase()} ${esc(o.name)}: ${INTERPOLATION_LABEL[el.value]}.`);rebuild();buildPaths();updateScene();});
+ if($('#duplicate-object')){$('#duplicate-object').disabled=exporting||recording||session.readOnly;$('#duplicate-object').onclick=()=>duplicateSetPiece(o.id);}
  if($('#delete-object')){$('#delete-object').disabled=exporting||recording||o.locked;$('#delete-object').onclick=()=>deleteItem(o.id);}
+}
+/** Duplikasi prop atau dinding modular — satu langkah undo, jalur command yang sama. */
+function duplicateSetPiece(id){
+  if(exporting||recording)return;
+  const source=setPieces().find(o=>o.id===id);
+  if(!source){notify('Objek tidak ditemukan.');return;}
+  if(project.rooms.length+setPieces().length>=LIMITS.setObjects){notify(`Maksimal ${LIMITS.setObjects} objek set per scene.`);return;}
+  pause();finishKeyboardGesture();
+  const copy={...structuredClone(source),id:crypto.randomUUID(),name:`${source.name} (salinan)`.slice(0,100),locked:false};
+  copy.x=Math.max(-100,Math.min(100,copy.x+(gridSnap?GRID_STEP:0.5)));
+  (source.type==='wall'?project.walls:project.props).push(copy);
+  selected=copy.id;tab='props';
+  changed();renderTabs();
+  metrics.record('editor_command',{command_type:'duplicate_prop',source:'inspector',affected_count:1});
+  notify(`${source.name} diduplikasi. Gunakan Undo untuk membatalkan.`);
 }
 function deleteItem(id){
  if(exporting||recording)return;
- const item=[...project.actors,...project.rooms,project.camera].filter(Boolean).find(o=>o.id===id);
+ const item=[...project.actors,...project.rooms,...setPieces(),project.camera].filter(Boolean).find(o=>o.id===id);
  if(!item||item.locked){notify('Buka kunci item sebelum menghapusnya.');return;}
  pause();finishKeyboardGesture();
  // F4-02/PRD §11: identitas aktor milik scene, kamera milik shot. Menghapus aktor
@@ -250,9 +354,9 @@ function deleteItem(id){
    fallback=shots.filter(sh=>sh.camera&&sh.camera.targetId===id&&sh.id!==store.shotId).map(sh=>sh.name);
  }
  if(id===project.camera?.id){project.camera=null;if(view==='camera')resetView();}
- else {project.actors=project.actors.filter(a=>a.id!==id);project.rooms=project.rooms.filter(r=>r.id!==id);if(project.camera?.target===id)project.camera.target='';}
- if(selected===id)selected=(tab==='camera'?project.camera:project[tab][0])?.id||'camera';
- keySelection=keySelection.filter(sel=>sel.id!==id);
+ else {project.actors=project.actors.filter(a=>a.id!==id);project.rooms=project.rooms.filter(r=>r.id!==id);project.props=project.props.filter(o=>o.id!==id);project.walls=project.walls.filter(o=>o.id!==id);if(project.camera?.target===id)project.camera.target='';}
+ if(selected===id)selected=(tab==='camera'?project.camera:tabItems()[0])?.id||'camera';
+ keySelection=keySelection.filter(sel=>ownerOf(sel.id)!==id);
  changed();renderTabs();
  notify(`${item.name} dihapus.${fallback.length?` Kamera pada ${fallback.join(', ')} kembali ke titik pandang manual.`:''} Gunakan Undo untuk memulihkan.`);
 }
@@ -260,15 +364,16 @@ function syncCameraUI(){
  const absent=!project.camera;$('#no-camera').hidden=!absent;$('#export').disabled=absent||exporting;$('#edit-camera-view').disabled=absent;
  document.querySelector('[data-view="camera"]').disabled=absent;
  $('.frame-guide').hidden=absent;$('#lens-label').textContent=absent?'Belum ada kamera':`${project.camera.focal} mm · Perspective`;
- const collisions=project.actors.filter(a=>a.visible!==false).flatMap(a=>wallCrossings(a,project.rooms).map(c=>({...c,name:a.name})));
- $('#path-warning').hidden=!collisions.length;$('#path-warning').textContent=collisions.length?`Jalur ${collisions[0].name} melewati dinding pada ${collisions[0].t.toFixed(1)}s. Tambahkan pintu atau atur keyframe.`:'';
+ // F4-08: dinding modular ikut diperiksa. Tetap PERINGATAN, bukan collision fisik.
+ const collisions=project.actors.filter(a=>a.visible!==false).flatMap(a=>wallCrossings(a,project.rooms,project.walls).map(c=>({...c,name:a.name})));
+ $('#path-warning').hidden=!collisions.length;$('#path-warning').textContent=collisions.length?`Jalur ${collisions[0].name} melewati ${collisions[0].wall==='segment'?'dinding modular':'dinding'} pada ${collisions[0].t.toFixed(1)}s. Tambahkan pintu, geser dinding, atau atur keyframe.`:'';
 }
 function rebuild(){syncCameraUI();syncShotUI();buildScene();renderList();renderInspector();renderTimeline();renderScenes();renderShots();renderCompare();renderBreadcrumb();}
 function changed(){persist();rebuild();}
 function select(id){if(exporting||recording)return;finishKeyboardGesture();selected=id;tab=kind();renderTabs();renderList();renderInspector();updateScene();}
 function renderTabs(){document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));}
 // ---------- F4-03/F4-04: ruler frame, zoom/pan, seleksi & edit keyframe ----------
-const laneLabel=()=>window.innerWidth<=540?70:108;
+const laneLabel=()=>window.innerWidth<=540?70:138;
 const laneWidth=()=>Math.max(1,$('#timeline-body').clientWidth-laneLabel()-16);
 /** Menggeser jendela agar playhead tetap terlihat; ini UI state, bukan perubahan kreatif. */
 function ensureVisible(rerender=true){
@@ -282,13 +387,29 @@ function renderTimeline(){
   const dur=project.duration,fps=shotFps(),win=timelineWindow;
   win.setDuration(dur);
   $('#ruler').innerHTML=rulerTicks(win,fps).map(t=>`<span class="tick" style="left:${(t.fraction*100).toFixed(4)}%">${t.frame}</span>`).join('');
+  // F4-05: satu LANE per track. Aktor punya dua (posisi + orientasi) dengan penanda
+  // keyframe berbeda bentuk, kamera tetap satu lane pose.
+  syncKeys();
   $('#tracks').innerHTML=keyObjects().map(o=>{
     const color=o.color||'#7d8c6d';
     const from=win.fractionOf(o.keys[0].t)*100,to=win.fractionOf(o.keys.at(-1).t)*100;
-    const keys=o.keys.filter(k=>win.contains(k.t)).map(k=>`<button class="key ${isKeySelected(o.id,k.t)?'selected':''}" style="left:${(win.fractionOf(k.t)*100).toFixed(4)}%" data-time="${k.t}" data-object="${esc(o.id)}" title="${esc(o.name)} · frame ${frameOf(k.t,fps)}" aria-label="Keyframe ${esc(o.name)} frame ${frameOf(k.t,fps)}"></button>`).join('');
-    return `<div class="track"><div class="track-label" style="--c:${color}"><i></i>${esc(o.name)}</div><div class="track-lane" style="--c:${color}" data-track="${esc(o.id)}"><div class="track-line" style="left:${Math.max(-5,from)}%;width:${Math.max(0,Math.min(110,to)-Math.max(-5,from))}%"></div>${keys}</div></div>`;
+    const keys=o.keys.filter(k=>win.contains(k.t)).map(k=>`<button class="key ${o.property} ${isKeySelected(o.id,k.t)?'selected':''}" style="left:${(win.fractionOf(k.t)*100).toFixed(4)}%" data-time="${k.t}" data-object="${esc(o.id)}" title="${esc(o.name)} · frame ${frameOf(k.t,fps)}" aria-label="Keyframe ${esc(o.name)} frame ${frameOf(k.t,fps)}"></button>`).join('');
+    const interpolation=`<select class="lane-interp" data-lane="${esc(o.id)}" aria-label="Interpolasi track ${esc(o.name)}" title="Interpolasi track ${esc(o.name)}">${INTERPOLATIONS.map(i=>`<option value="${i}" ${(o.interpolation??'linear')===i?'selected':''}>${INTERPOLATION_LABEL[i]}</option>`).join('')}</select>`;
+    return `<div class="track track-${o.property}"><div class="track-label" style="--c:${color}"><i></i><span class="track-name">${esc(o.name)}</span>${interpolation}</div><div class="track-lane" style="--c:${color}" data-track="${esc(o.id)}"><div class="track-line" style="left:${Math.max(-5,from)}%;width:${Math.max(0,Math.min(110,to)-Math.max(-5,from))}%"></div>${keys}</div></div>`;
   }).join('');
   document.querySelectorAll('.key').forEach(b=>b.addEventListener('pointerdown',event=>onKeyPointerDown(event,b)));
+  document.querySelectorAll('.lane-interp').forEach(el=>{
+    el.disabled=exporting||recording||session.readOnly;
+    el.onchange=()=>{
+      const lane=keyObjects().find(o=>o.id===el.dataset.lane);
+      if(!lane)return;
+      if(lane.locked||lane.visible===false){notify(`${lane.name} terkunci atau tersembunyi.`);renderTimeline();return;}
+      lane.interpolation=el.value;syncKeys();
+      persist();metrics.record('editor_command',{command_type:'track_interpolation',source:'timeline',affected_count:1});
+      notify(`Interpolasi ${lane.name}: ${INTERPOLATION_LABEL[el.value]}.`);
+      rebuild();buildPaths();updateScene();
+    };
+  });
   $('#scrub').max=dur;$('#duration').value=dur;$('#total-display').textContent=`/ ${formatTime(dur,false)}`;
   $('#zoom-label').textContent=`${win.zoom<1?win.zoom.toFixed(2):Math.round(win.zoom)}×`;
   $('#zoom-in').disabled=exporting||win.zoom>=MAX_ZOOM;$('#zoom-out').disabled=exporting||win.zoom<=MIN_ZOOM;
@@ -343,7 +464,7 @@ function onKeyPointerDown(event,button){
   if(event.shiftKey||event.ctrlKey||event.metaKey){toggleKeySelection(id,t);renderTimeline();return;}
   pause();finishKeyboardGesture();
   if(!isKeySelected(id,t))keySelection=[{id,t}];
-  time=snapT(t);select(id);ensureVisible(false);updateScene();renderTimeline();renderInspector();
+  time=snapT(t);select(ownerOf(id));ensureVisible(false);updateScene();renderTimeline();renderInspector();
   if(session.readOnly)return;
   const snapshot=new Map(keyObjects().map(o=>[o.id,structuredClone(o.keys)]));
   keyDrag={startX:event.clientX,width,
@@ -360,10 +481,12 @@ function onKeyPointerMove(event){
   // Setiap gerakan dihitung ulang dari snapshot awal, jadi pembulatan snapping tidak
   // pernah menumpuk selama drag berlangsung.
   for(const o of keyObjects())if(drag.snapshot.has(o.id))o.keys=structuredClone(drag.snapshot.get(o.id));
+  syncKeys();
   const delta=dx/drag.width*timelineWindow.span;
   const result=moveKeys(keyObjects(),drag.origin,delta,{fps:shotFps(),duration:project.duration,snap:snapEnabled});
   drag.replaced=result.replaced;drag.skipped=result.skipped;
   drag.shifted=result.moved.filter(m=>Math.abs(m.delta)>1e-9).reduce((n,m)=>n+m.count,0);
+  syncKeys();
   keySelection=result.selection.length?result.selection:drag.origin.map(sel=>({...sel}));
   updateScene();buildPaths();renderTimeline();
 }
@@ -400,7 +523,7 @@ function pasteKeysAtPlayhead(){
     {fps,duration:project.duration,snap:snapEnabled,cameraId:project.camera?.id??null}),
     {commandType:'keyframe_paste',affected:keyClipboard.count});
   if(!result)return;
-  keySelection=result.applied.map(a=>({id:a.id,t:a.t}));
+  syncKeys();keySelection=result.applied.map(a=>({id:a.id,t:a.t}));
   notify(describeKeyResult(`ditempel pada frame ${frameOf(snapT(time),fps)}`,result.applied.length,result.replaced,result.skipped));
   rebuild();buildPaths();updateScene();
 }
@@ -409,7 +532,7 @@ function deleteSelectedKeys(){
   const picked=keySelection.length;
   const result=runKeyEdit(()=>deleteKeys(keyObjects(),keySelection,{fps:shotFps()}),{commandType:'keyframe_delete',affected:picked});
   if(!result)return;
-  keySelection=[];
+  syncKeys();keySelection=[];
   const total=result.removed.reduce((n,r)=>n+r.count,0);
   const kept=result.kept.length?` Satu keyframe dipertahankan untuk ${result.kept.map(k=>k.name).join(', ')} — track wajib punya minimal satu keyframe.`:'';
   notify(describeKeyResult('dihapus',total,[],result.skipped)+kept);
@@ -417,10 +540,16 @@ function deleteSelectedKeys(){
 }
 function pause(){playing=false;updateModeCue();if(recording){recording=false;session.end();$('#record').classList.remove('recording');persist(false);buildPaths();renderTimeline();}$('#play').innerHTML=icon('play');refreshIcons();renderInspector();}
 function play(){if(time>=project.duration)time=0;playing=true;$('#play').innerHTML=icon('pause');refreshIcons();updateModeCue();}
-function moveSelected(dx,dz){const o=objectData();if(!editable(o))return;if(kind()==='rooms'){o.x=Math.max(-100,Math.min(100,onGrid(o.x+dx)));o.z=Math.max(-100,Math.min(100,onGrid(o.z+dz)));buildScene();}else{const p=recording?{...recordPose}:sample(o.keys,time);p.x=Math.max(-100,Math.min(100,onGrid(p.x+dx)));p.z=Math.max(-100,Math.min(100,onGrid(p.z+dz)));if(recording)recordPose={...p};setKey(o.keys,p,time);updateScene();buildPaths();}if(!recording&&!drag){persist();syncCameraUI();renderTimeline();renderInspector();}}
+function moveSelected(dx,dz){const o=objectData();if(!editable(o))return;
+ // Ruangan, prop dan dinding modular adalah objek statis: posisinya properti biasa,
+ // bukan keyframe. Aktor dan kamera menulis keyframe pada track POSISI saja —
+ // menggeser tidak boleh menyentuh orientasi (PRD §8 "arah gerak ≠ arah hadap").
+ if(kind()==='rooms'||kind()==='props'){o.x=Math.max(-100,Math.min(100,onGrid(o.x+dx)));o.z=Math.max(-100,Math.min(100,onGrid(o.z+dz)));buildScene();}
+ else{const p=recording?{...recordPose}:poseAt(o,time);p.x=Math.max(-100,Math.min(100,onGrid(p.x+dx)));p.z=Math.max(-100,Math.min(100,onGrid(p.z+dz)));if(recording)recordPose={...p};setKey(o,p,time,o.position?'position':'both');updateScene();buildPaths();}
+ if(!recording&&!drag){persist();syncCameraUI();renderTimeline();renderInspector();}}
 function rotateSelected(degrees){
  const o=objectData();if(kind()!=='actors'||!editable(o))return;
- const p=recording?{...recordPose}:sample(o.keys,time);p.r=((p.r+degrees)%360+360)%360;if(recording)recordPose={...p};setKey(o.keys,p,time);updateScene();
+ const p=recording?{...recordPose}:poseAt(o,time);p.r=((p.r+degrees)%360+360)%360;if(recording)recordPose={...p};setKey(o,p,time,'rotation');updateScene();
  if(!recording&&!drag){persist();renderInspector();renderTimeline();}
 }
 /** Melangkah tepat satu frame (F4-03): padanan keyboard untuk playhead presisi. */
@@ -461,7 +590,10 @@ window.addEventListener('keyup',e=>{keysDown.delete(e.key.toLowerCase());if(!key
 window.addEventListener('blur',()=>{finishKeyboardGesture();endDrag();if(recording)pause();});
 function setMode(m){mode=m;for(const t of ['orbit','move','rotate'])$(`#${t}-tool`).classList.toggle('active',m===t);renderer3d.canvas.style.cursor=m==='orbit'?'grab':m==='rotate'?'ew-resize':'crosshair';renderer3d.controls.enabled=m==='orbit'&&view!=='camera';$('.viewport-hint').innerHTML=m==='rotate'?'<kbd>Drag</kbd> Putar karakter <span>·</span> <kbd>Q / E</kbd> −5° / +5°':m==='move'?'<kbd>Drag</kbd> Geser karakter · Pilih lokasi dahulu untuk menggesernya <span>·</span> <kbd>O</kbd> Orbit':'<kbd>Drag</kbd> Putar tampilan <span>·</span> <kbd>G</kbd> Geser <span>·</span> <kbd>R</kbd> Putar karakter';}
 let drag=null,down=null;
-const hitId=e=>renderer3d.hitId(e,{mode,roomIds:project.rooms.map(r=>r.id)});
+// ED-05 "picking aman": objek SET (ruangan, props, dinding modular) hanya menjadi
+// target transform setelah dipilih eksplisit. Tanpa aturan ini, drag pada karakter
+// dapat menyambar set dressing yang kebetulan berada di bawah pointer.
+const hitId=e=>renderer3d.hitId(e,{mode,roomIds:[...project.rooms.map(r=>r.id),...setPieces().map(o=>o.id)]});
 renderer3d.canvas.addEventListener('pointerdown',e=>{
  if(exporting||e.button!==0)return;down={x:e.clientX,y:e.clientY};
  if(mode==='orbit')return;
@@ -472,7 +604,7 @@ renderer3d.canvas.addEventListener('pointerdown',e=>{
  // dengan pesan, bukan dengan ReadOnlyError yang tidak tertangkap.
  if(session.readOnly){notify('Tab ini baca-saja. Pilih “Buka salinan” atau “Ambil alih” pada banner.');return;}
  const p=renderer3d.floorPoint(e);
- if(mode==='rotate'||p){const o=objectData(),pose=o.keys?sample(o.keys,time):o;
+ if(mode==='rotate'||p){const o=objectData(),pose=o.keys?poseAt(o,time):o;
    if(!recording)session.begin();
    drag={id:selected,mode,offsetX:p?pose.x-p.x:0,offsetZ:p?pose.z-p.z:0,lastX:e.clientX};renderer3d.canvas.setPointerCapture(e.pointerId);
  }
@@ -481,21 +613,34 @@ renderer3d.canvas.addEventListener('pointermove',e=>{
  if(!drag||exporting||drag.id!==selected)return;
  if(drag.mode==='rotate'){rotateSelected((e.clientX-drag.lastX)*.6);drag.lastX=e.clientX;return;}
  const p=renderer3d.floorPoint(e);if(!p)return;
- const o=objectData(),pose=o.keys?sample(o.keys,time):o;moveSelected(p.x+drag.offsetX-pose.x,p.z+drag.offsetZ-pose.z);
+ const o=objectData(),pose=o.keys?poseAt(o,time):o;moveSelected(p.x+drag.offsetX-pose.x,p.z+drag.offsetZ-pose.z);
 });
 function endDrag(){if(drag&&!recording){session.end();persist(false);syncCameraUI();renderInspector();renderTimeline();metrics.record('editor_command',{command_type:drag.mode==='rotate'?'rotate':'move',source:'pointer',affected_count:1});}drag=null;down=null;}
 renderer3d.canvas.addEventListener('pointerup',e=>{if(!drag&&mode==='orbit'&&down&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<4){const id=hitId(e);if(id)select(id);}endDrag();});renderer3d.canvas.addEventListener('pointercancel',endDrag);
 function resetView(top=false){renderer3d.resetView(top);setView(renderer3d.viewMode);setMode(mode);document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));}
-document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{if(exporting||recording)return;finishKeyboardGesture();tab=b.dataset.tab;selected=(tab==='camera'?project.camera:project[tab][0])?.id||'camera';renderTabs();renderList();renderInspector();});
-$('#add-object').onclick=()=>{if(exporting||recording)return;const id=crypto.randomUUID();if(tab==='camera'){project.camera=initialProject().camera;project.camera.target=project.actors[0]?.id||'';project.camera.keys=[{...project.camera.keys[0],t:0}];selected=project.camera.id;changed();return;}if(tab==='actors'){if(project.actors.length>=50){notify('Maksimal 50 karakter per proyek.');return;}project.actors.push({id,name:`Karakter ${String(project.actors.length+1).padStart(2,'0')}`,color:palette[project.actors.length%palette.length],height:1.75,locked:false,visible:true,keys:[{t:0,x:0,z:3,r:0}]});}else{if(project.rooms.length>=30){notify('Maksimal 30 ruangan per proyek.');return;}project.rooms.push({id,name:`Ruangan ${project.rooms.length+1}`,x:0,z:8,w:6,d:5,h:3,doors:[],locked:true,visible:true,color:'#c5c8b3'});}selected=id;changed();metrics.record('editor_command',{command_type:tab==='actors'?'add_actor':'add_room',source:'list',affected_count:1});};
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{if(exporting||recording)return;finishKeyboardGesture();tab=b.dataset.tab;selected=(tab==='camera'?project.camera:tabItems()[0])?.id||'camera';renderTabs();renderList();renderInspector();updateScene();});
+$('#add-object').onclick=()=>{if(exporting||recording)return;const id=crypto.randomUUID();if(tab==='camera'){project.camera=initialProject().camera;project.camera.target=project.actors[0]?.id||'';project.camera.keys=[{...project.camera.keys[0],t:0}];selected=project.camera.id;changed();return;}if(tab==='actors'){if(project.actors.length>=50){notify('Maksimal 50 karakter per proyek.');return;}project.actors.push({id,name:`Karakter ${String(project.actors.length+1).padStart(2,'0')}`,color:palette[project.actors.length%palette.length],height:1.75,locked:false,visible:true,
+   // v3: dua track independen sejak lahir; `keys` gabungan adalah cache turunan.
+   position:{property:'position',interpolation:'linear',keys:[{t:0,x:0,z:3}]},
+   rotation:{property:'rotation',interpolation:'linear',keys:[{t:0,r:0}]},
+   keys:[{t:0,x:0,z:3,r:0}]});}else if(tab==='props'){
+   if(project.rooms.length+setPieces().length>=LIMITS.setObjects){notify(`Maksimal ${LIMITS.setObjects} objek set per scene.`);return;}
+   const at=renderer3d.observerFocus?.()??{x:0,z:0};
+   if(propShape==='wall')project.walls.push({id,type:'wall',name:`Dinding ${project.walls.length+1}`,color:'#b8bcae',x:at.x,z:at.z,r:0,length:4,height:2.6,thickness:.12,locked:false,visible:true});
+   else project.props.push({id,type:'prop',shape:propShape,name:`${{box:'Box',table:'Meja',chair:'Kursi',decor:'Dekorasi'}[propShape]} ${project.props.length+1}`,color:{box:'#b9ab8e',table:'#a08767',chair:'#82958b',decor:'#8a927d'}[propShape],
+     x:at.x,z:at.z,y:{box:.35,table:.38,chair:.45,decor:.4}[propShape],r:0,
+     ...{box:{w:.8,d:.8,h:.7},table:{w:1.4,d:.8,h:.75},chair:{w:.5,d:.5,h:.9},decor:{w:.6,d:.6,h:.6}}[propShape],
+     locked:false,visible:true});
+ }else{if(project.rooms.length+setPieces().length>=LIMITS.setObjects){notify(`Maksimal ${LIMITS.setObjects} objek set per scene.`);return;}project.rooms.push({id,name:`Ruangan ${project.rooms.length+1}`,x:0,z:8,w:6,d:5,h:3,doors:[],locked:true,visible:true,color:'#c5c8b3'});}selected=id;changed();metrics.record('editor_command',{command_type:tab==='actors'?'add_actor':tab==='props'?'add_prop':'add_room',source:'list',affected_count:1});};
 $('#play').onclick=()=>{if(exporting)return;playing?pause():play();};$('#rewind').onclick=()=>{if(exporting)return;pause();time=0;updateScene();updateTimeUI();renderInspector();};$('#scrub').oninput=e=>{if(exporting)return;pause();time=snapT(Number(e.target.value));ensureVisible();updateScene();updateTimeUI();renderInspector();};
-$('#record').onclick=()=>{if(exporting)return;if(recording){pause();notify('Gerakan disimpan sebagai keyframe.');return;}if(kind()!=='actors'||!editable()){notify('Pilih karakter yang terlihat dan tidak terkunci.');return;}if(time>=project.duration)time=0;finishKeyboardGesture();session.begin();recordPose=sample(objectData().keys,time);recordFrom=time;setKey(objectData().keys,recordPose,time);recording=true;setMode('move');updateHistoryUI();renderInspector();$('#record').classList.add('recording');play();notify('Rekam aktif. Gunakan panah untuk bergerak, Q/E untuk berputar.');};
+$('#record').onclick=()=>{if(exporting)return;if(recording){pause();notify('Gerakan disimpan sebagai keyframe.');return;}if(kind()!=='actors'||!editable()){notify('Pilih karakter yang terlihat dan tidak terkunci.');return;}if(time>=project.duration)time=0;finishKeyboardGesture();session.begin();recordPose=poseAt(objectData(),time);recordFrom=time;setKey(objectData(),recordPose,time,'both');recording=true;setMode('move');updateHistoryUI();renderInspector();$('#record').classList.add('recording');play();notify('Rekam aktif. Gunakan panah untuk bergerak, Q/E untuk berputar.');};
 $('#duration').onchange=e=>{if(exporting)return;const n=Number(e.target.value);if(!Number.isFinite(n)||n<1||n>120){e.target.value=project.duration;return;}pause();
  if(n<project.duration){
-   const tracked=[...project.actors,...(project.camera?[project.camera]:[])];
+   const tracked=keyObjects();
    const {skipped}=partitionByLock(tracked.filter(o=>o.keys.some(k=>k.t>n)),{skipHidden:false});
    if(skipped.length){notify(`Buka kunci objek berikut sebelum memendekkan durasi: ${describeSkipped(skipped)}.`);e.target.value=project.duration;return;}
    for(const o of tracked)if(!o.locked)o.keys=trimTrackToDuration(o.keys,n);
+   syncKeys();
  }
  project.duration=n;time=Math.min(time,n);keySelection=[];timelineWindow.setDuration(n);timelineWindow.setZoom(MIN_ZOOM);changed();};
 $('#project-title').onchange=e=>{if(recording)pause();project.title=e.target.value.trim()||'Scene tanpa judul';e.target.value=project.title;persist();renderBreadcrumb();};
@@ -533,7 +678,10 @@ $('#cancel-export').onclick=()=>exportService.cancel();
 let last=performance.now(),recordTick=0;
 function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.1);last=now;renderer3d.selected=selected;
  if(playing){time=Math.min(project.duration,time+dt);
-  if(recording&&now-recordTick>95){recordTick=now;const recorded=objectData();recorded.keys=recorded.keys.filter(k=>k.t<=recordFrom||k.t>=snapT(time));const dx=(keysDown.has('arrowright')?1:0)-(keysDown.has('arrowleft')?1:0),dz=(keysDown.has('arrowdown')?1:0)-(keysDown.has('arrowup')?1:0);if(dx||dz)moveSelected(dx*.18,dz*.18);const turn=(keysDown.has('e')?1:0)-(keysDown.has('q')?1:0);if(turn)rotateSelected(turn*6);if(!dx&&!dz&&!turn){const o=objectData();if(editable(o))setKey(o.keys,recordPose,time);}recordFrom=snapT(time);}
+  if(recording&&now-recordTick>95){recordTick=now;const recorded=objectData();
+   // Rekaman menimpa gerak lama di rentang yang sedang direkam — pada KEDUA track.
+   for(const track of (recorded.position?[recorded.position,recorded.rotation]:[recorded]))track.keys=track.keys.filter(k=>k.t<=recordFrom||k.t>=snapT(time));
+   if(recorded.position)refreshCombined(recorded);const dx=(keysDown.has('arrowright')?1:0)-(keysDown.has('arrowleft')?1:0),dz=(keysDown.has('arrowdown')?1:0)-(keysDown.has('arrowup')?1:0);if(dx||dz)moveSelected(dx*.18,dz*.18);const turn=(keysDown.has('e')?1:0)-(keysDown.has('q')?1:0);if(turn)rotateSelected(turn*6);if(!dx&&!dz&&!turn){const o=objectData();if(editable(o))setKey(o,recordPose,time,'both');}recordFrom=snapT(time);}
   if(!timelineWindow.contains(time)){timelineWindow.start=time-timelineWindow.span*0.1;timelineWindow.clamp();renderTimeline();}
   updateTimeUI();updateScene();if(time>=project.duration){if(exporting){playing=false;renderer3d.renderPOV(project);exportService.stop();}else pause();}}
  renderer3d.renderViewport(project,{forcePov:exporting});recordSession();}
@@ -595,7 +743,7 @@ function renderScenes(){
   $('#scene-list').innerHTML=scenes.map((sc,i)=>{
     const isActive=sc.id===store.sceneId,thumb=sceneThumbs.get(sc.id),shot=sc.shots[0];
     if(renamingScene===sc.id)return `<div class="scene-row selected"><input class="scene-rename" id="scene-rename-input" maxlength="100" value="${esc(sc.name)}" aria-label="Nama scene"/></div>`;
-    return `<div class="scene-row ${isActive?'selected':''}"><button class="scene-open" data-scene-open="${esc(sc.id)}" aria-current="${isActive?'true':'false'}" aria-label="Buka ${esc(sc.name)}"><span class="scene-thumb">${thumb?`<img src="${esc(thumb)}" alt=""/>`:`<i>${String(i+1).padStart(2,'0')}</i>`}</span><span class="scene-text"><strong>${esc(sc.name)}</strong><small>${sc.actors.length} karakter · ${sc.setObjects.length} lokasi · ${shot?shot.duration:0}s</small></span></button></div>`;
+    return `<div class="scene-row ${isActive?'selected':''}"><button class="scene-open" data-scene-open="${esc(sc.id)}" aria-current="${isActive?'true':'false'}" aria-label="Buka ${esc(sc.name)}"><span class="scene-thumb">${thumb?`<img src="${esc(thumb)}" alt=""/>`:`<i>${String(i+1).padStart(2,'0')}</i>`}</span><span class="scene-text"><strong>${esc(sc.name)}</strong><small>${sc.actors.length} karakter · ${sc.setObjects.filter(o=>(o.type??'room')==='room').length} lokasi · ${sc.setObjects.filter(o=>o.type==='prop'||o.type==='wall').length} props · ${shot?shot.duration:0}s</small></span></button></div>`;
   }).join('');
   $('#scene-actions').innerHTML=[
     ['scene-move-up','chevron-up','Naikkan urutan scene'],
@@ -892,6 +1040,15 @@ $('#metrics-clear').onclick=()=>{metrics.clear();renderMetrics();notify('Riwayat
 $('#metrics-optin').onchange=e=>{metrics.setTelemetryOptIn(e.target.checked);notify(e.target.checked?'Pilihan disimpan. Pengiriman telemetry eksternal belum diimplementasikan sama sekali.':'Telemetry eksternal tetap mati.');};
 // F6-07/PRD §14: rollback aplikasi harus punya jalan keluar data yang dapat dipakai
 // build lama. Dokumen v2 tetap utuh; berkas v1 adalah salinan tambahan.
+// docs/ROLLOUT.md §6: build R1 hanya mengenal schema v2, dan `exportAsV1` hanya membawa
+// satu scene + satu shot. Unduhan v2 mempertahankan seluruh scene, shot dan keyframe.
+$('#export-v2').onclick=()=>{
+  try{
+    const {data,dropped}=exportAsV2(store.snapshot());
+    download(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),`${project.title.replace(/[^a-z0-9 -]/gi,'')||'scene'}-v2.json`);
+    notify(dropped.length?`JSON v2 diunduh (seluruh scene & shot). Tidak ikut terbawa: ${dropped.join(', ')}.`:'JSON v2 diunduh (seluruh scene & shot).');
+  }catch(err){notify(`Gagal membuat JSON v2: ${err.message}`);}
+};
 $('#export-v1').onclick=()=>{
   try{
     const {data,dropped}=exportAsV1(store.snapshot(),{sceneId:store.sceneId,shotId:store.shotId});
@@ -907,7 +1064,8 @@ $('#open-last-saved').onclick=async()=>{
   const saved=await repository.getDocument(store.doc.id);
   if(!saved){notify('Belum ada versi tersimpan untuk proyek ini.');return;}
   if(session.readOnly){notify('Tab baca-saja tidak dapat mengganti dokumen.');return;}
-  pause();project=session.openDocument(saved);time=0;selected=project.actors[0]?.id||project.camera?.id||'camera';tab=kind();
+  // Dokumen tersimpan bisa saja schema lama; ia harus melewati migrator.
+  pause();project=session.openDocument(openProjectData(saved).document);time=0;selected=project.actors[0]?.id||project.camera?.id||'camera';tab=kind();
   $('#project-title').value=project.title;$('#duration').value=project.duration;renderTabs();changed();updateTimeUI();
   metrics.record('recovery_used',{action:'open_last',snapshot_age:Math.max(0,Math.round((Date.now()-new Date(saved.updatedAt).getTime())/1000))});
   $('#revision-panel').hidden=true;notify('Versi tersimpan terakhir dibuka.');
@@ -933,7 +1091,7 @@ $('#take-over').onclick=async()=>{
   if(!stored.lock){notify('Kunci tulis tidak tersedia di browser ini.');return;}
   const result=await stored.lock.takeOver();
   if(!result.ok){notify(result.reason);return;}
-  const fresh=repository?await repository.getDocument(store.doc.id).catch(()=>null):null;
+  const fresh=repository?await repository.getDocument(store.doc.id).then(d=>d?openProjectData(d).document:null).catch(()=>null):null;
   if(fresh){project=store.load(fresh);session.useHistoryFor(store.doc);}
   applyReadOnly(false);
   renderTabs();rebuild();updateTimeUI();saveNow();
@@ -997,7 +1155,7 @@ if(stored.createdNew)metrics.record('project_created',{storage:repository?'local
 if(stored.recoveredPending)metrics.record('recovery_used',{action:'pending',snapshot_age:0});
 requestAnimationFrame(animate);
 // Read-only diagnostics for browser smoke checks.
-window.blockingRoom={getProject:()=>structuredClone(project),getDocument:()=>structuredClone(store.doc),getTime:()=>time,getSceneObjectCount:()=>renderer3d.actorMeshes.size+renderer3d.roomMeshes.size, getObjectState:id=>{const o=renderer3d.actorMeshes.get(id)||renderer3d.roomMeshes.get(id)||renderer3d.cameraMarker;return {visible:o.visible,rotation:o.rotation.y,position:o.position.toArray()};},getWalk:id=>{const g=renderer3d.actorMeshes.get(id);return [g.getObjectByName('leg-0').rotation.x,g.getObjectByName('leg-1').rotation.x];},getWalls:id=>{const panels=[];renderer3d.roomMeshes.get(id)?.traverse(o=>{if(o.userData.wallPanel)panels.push({wall:o.userData.wallPanel,position:o.position.toArray(),size:[o.geometry.parameters.width,o.geometry.parameters.height,o.geometry.parameters.depth]});});return panels;},getView:()=>view,projectPoint:(x,y,z)=>renderer3d.projectPoint(x,y,z), cameraDebug:()=>renderer3d.cameraDebug(),
+window.blockingRoom={getProject:()=>structuredClone(project),getDocument:()=>structuredClone(store.doc),getTime:()=>time,getSceneObjectCount:()=>renderer3d.actorMeshes.size+renderer3d.roomMeshes.size, getObjectState:id=>{const o=renderer3d.actorMeshes.get(id)||renderer3d.roomMeshes.get(id)||renderer3d.propMeshes.get(id)||renderer3d.cameraMarker;return {visible:o.visible,rotation:o.rotation.y,position:o.position.toArray()};},getWalk:id=>{const g=renderer3d.actorMeshes.get(id);return [g.getObjectByName('leg-0').rotation.x,g.getObjectByName('leg-1').rotation.x];},getWalls:id=>{const panels=[];renderer3d.roomMeshes.get(id)?.traverse(o=>{if(o.userData.wallPanel)panels.push({wall:o.userData.wallPanel,position:o.position.toArray(),size:[o.geometry.parameters.width,o.geometry.parameters.height,o.geometry.parameters.depth]});});return panels;},getView:()=>view,projectPoint:(x,y,z)=>renderer3d.projectPoint(x,y,z), cameraDebug:()=>renderer3d.cameraDebug(),
  // Kait uji Fase 2 (tests/repository-browser.mjs): status penyimpanan, revisi, kunci tab.
  getSaveStatus:()=>({status:autosave.status,text:$('#save-status').textContent,error:autosave.lastError?.name??null}),
  isReadOnly:()=>session.readOnly,
@@ -1009,7 +1167,19 @@ window.blockingRoom={getProject:()=>structuredClone(project),getDocument:()=>str
  getStoredDocument:id=>repository?repository.getDocument(id??store.doc.id):Promise.resolve(null),
  getStoredSession:()=>repository?repository.getSession(store.doc.id):Promise.resolve(null),
  flushSession:()=>sessionTracker.flush(),
- getScenes:()=>store.doc.scenes.map(s=>({id:s.id,name:s.name,order:s.order,notes:s.notes,actors:s.actors.length,rooms:s.setObjects.length,shot:s.shots[0]?.name})),
+ getScenes:()=>store.doc.scenes.map(s=>({id:s.id,name:s.name,order:s.order,notes:s.notes,actors:s.actors.length,rooms:s.setObjects.filter(o=>(o.type??'room')==='room').length,props:s.setObjects.filter(o=>o.type==='prop'||o.type==='wall').length,shot:s.shots[0]?.name})),
+ // Kait uji Fase 4b (props, dinding modular, interpolasi track).
+ getProps:()=>structuredClone([...(project.props??[]),...(project.walls??[])]),
+ addProp:shape=>{propShape=shape;tab='props';renderTabs();renderList();$('#add-object').click();return selected;},
+ duplicateProp:id=>duplicateSetPiece(id),
+ setInterpolation:(actorId,property,value)=>{
+   const actor=project.actors.find(a=>a.id===actorId);
+   if(!actor)return null;
+   actor[property].interpolation=value;syncKeys();persist();rebuild();buildPaths();updateScene();
+   return actor[property].interpolation;
+ },
+ setKeyTarget:target=>{keyTarget=target;renderInspector();return keyTarget;},
+ getPathWarning:()=>($('#path-warning').hidden?null:$('#path-warning').textContent),
  // Kait uji Fase 4 (tests/shot-timeline-browser.mjs).
  getShots:()=>store.scene.shots.map(sh=>({id:sh.id,name:sh.name,order:sh.order,duration:sh.duration,fps:sh.fps,aspectRatio:sh.aspectRatio,notes:sh.notes,
    cameraId:sh.cameraId,focal:sh.camera?.focal??null,target:sh.camera?.targetId??null,locked:sh.camera?.locked??null,
@@ -1025,7 +1195,17 @@ window.blockingRoom={getProject:()=>structuredClone(project),getDocument:()=>str
    start:timelineWindow.start,span:timelineWindow.span,duration:project.duration,lastFrame:lastFrame(project.duration,shotFps()),
    selection:structuredClone(keySelection),clipboard:keyClipboard?keyClipboard.count:0}),
  setFrame:frame=>{$('#frame-input').value=String(frame);$('#frame-input').dispatchEvent(new Event('change'));return frameOf(time,shotFps());},
- selectKeys:list=>{keySelection=list.map(k=>({id:k.id,t:k.t}));renderTimeline();return structuredClone(keySelection);},
+ // v3: seleksi bekerja per LANE (`<objectId>#position` / `#rotation`, atau ID kamera).
+ // Memberi ID objek telanjang berarti "seluruh track objek itu pada waktu tersebut",
+ // sehingga kait uji lama tetap punya arti yang sama.
+ selectKeys:list=>{
+   const lanes=keyObjects();
+   keySelection=list.flatMap(k=>{
+     if(lanes.some(o=>o.id===k.id))return [{id:k.id,t:k.t}];
+     const owned=lanes.filter(o=>o.ownerId===k.id);
+     return owned.length?owned.map(o=>({id:o.id,t:k.t})):[{id:k.id,t:k.t}];
+   });
+   renderTimeline();return structuredClone(keySelection);},
  copyKeys:()=>copySelectedKeys(),
  pasteKeys:()=>pasteKeysAtPlayhead(),
  deleteKeys:()=>deleteSelectedKeys(),

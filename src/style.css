@@ -229,3 +229,38 @@ button[hidden]{display:none!important}
   .frame-field input{width:64px}
   .shot-open{min-width:0}
 }
+
+/* ---------------------------------------------------------------------------
+   Fase 4b (schema v3) — track per properti, props ber-ID, dinding modular.
+   --------------------------------------------------------------------------- */
+/* Dua lane per aktor: penanda keyframe posisi tetap belah ketupat, orientasi
+   memakai bentuk bulat berongga supaya keduanya dapat dibedakan tanpa warna saja
+   (syarat aksesibilitas: status tidak boleh hanya lewat warna). */
+.key.rotation{transform:translateX(-50%);border-radius:50%;background:#faf9f5;border-width:2px}
+.key.rotation.selected{background:#a75333;border-color:#7d3a20;border-radius:50%;transform:translateX(-50%)}
+.track-position .track-lane{border-bottom-style:solid}
+.track-rotation .track-lane{border-bottom-style:dashed}
+.track-label .track-name{overflow:hidden;text-overflow:ellipsis}
+.lane-interp{width:auto;margin-left:auto;margin-right:6px;padding:2px 3px;font-size:8px;background:transparent;border-color:#e2e3d9;color:var(--muted)}
+.lane-interp:hover{background:#fdfcf8}
+.key-target{display:flex;gap:5px;margin:0 0 12px}
+.key-target button{flex:1;font-size:10px;padding:7px 3px}
+.prop-add-row{margin:0 17px}
+.prop-add-row .field{margin-bottom:8px}
+/* Label lane melebar karena kini memuat nama track DAN dropdown interpolasinya.
+   Nilai ini harus sama dengan `laneLabel()` di src/main.js. */
+.track-label{width:138px}
+.ruler{margin-left:138px}
+.scrub{left:138px;width:calc(100% - 154px)}
+@media(max-width:540px){
+  /* Empat tab tidak lagi muat dalam satu baris pada panel 135 px sambil menjaga
+     target sentuh 44 px; tab dibungkus menjadi dua baris. */
+  .tabs{flex-wrap:wrap;gap:4px}
+  .tabs button{flex:1 1 44%;min-width:44px;min-height:44px}
+  .track-label{width:70px}
+  .ruler{margin-left:70px}
+  .scrub{left:70px;width:calc(100% - 86px)}
+  .lane-interp{display:none}
+  .prop-add-row select{min-height:44px}
+  .key-target button{min-height:44px}
+}

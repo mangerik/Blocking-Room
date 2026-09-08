@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {DocumentStore, emptyDocument, readSceneView, writeSceneView} from '../src/document.js';
 import {EditorSession, describeSkipped, partitionByLock} from '../src/commands.js';
 import {openProjectData} from '../src/migrate.js';
-import {validateDocument} from '../src/schema.js';
+import {SCHEMA_VERSION, validateDocument} from '../src/schema.js';
 import {BACKUP_KEY, STORAGE_KEY, loadDocument, saveDocument} from '../src/storage.js';
 import {sampleScene, trimTrackToDuration} from '../src/timeline-engine.js';
 
@@ -32,9 +32,9 @@ function twoScenes() {
 test('scene view adalah salinan: memutasinya belum mengubah dokumen', () => {
   const doc = demoDocument();
   const view = readSceneView(doc);
-  view.actors[0].keys[0].x = 999;
+  view.actors[0].position.keys[0].x = 999;
   view.title = 'Judul lain';
-  assert.equal(doc.scenes[0].shots[0].tracks[0].keys[0].x, -5);
+  assert.equal(doc.scenes[0].shots[0].tracks[0].keys[0].x, -5); // track position aktor pertama
   assert.equal(doc.title, 'Pertemuan di galeri');
 });
 
@@ -43,13 +43,14 @@ test('mengedit scene aktif tidak pernah memutasi scene lain', () => {
   const store = new DocumentStore(doc);
   store.activate('scene-2', 'shot-2');
   const untouched = clone(store.doc.scenes[0]);
-  store.view.actors[0].keys[0].x = 42;
+  // v3 (F4-05): `keys` gabungan adalah cache TURUNAN; gerak ditulis ke track posisi.
+  store.view.actors[0].position.keys[0].x = 42;
   store.view.actors[0].name = 'Diubah di scene 2';
   store.view.rooms[0].locked = false;
   store.view.duration = 8;
   store.flush();
   assert.deepEqual(store.doc.scenes[0], untouched);
-  assert.equal(store.doc.scenes[1].shots[0].tracks[0].keys[0].x, 42);
+  assert.equal(store.doc.scenes[1].shots[0].tracks.find(t => t.property === 'position').keys[0].x, 42);
   assert.equal(store.doc.scenes[1].actors[0].name, 'Diubah di scene 2');
   assert.equal(store.doc.scenes[1].shots[0].duration, 8);
   assert.equal(store.doc.scenes[0].shots[0].duration, 12);
@@ -94,13 +95,13 @@ test('satu transaksi gestur menjadi satu langkah undo', () => {
   const session = new EditorSession(new DocumentStore(demoDocument()));
   session.begin();
   for (let i = 1; i <= 20; i++) {
-    session.view.actors[0].keys[0].x = i;
+    session.view.actors[0].position.keys[0].x = i;
     session.commit();
   }
   session.end();
-  assert.equal(session.view.actors[0].keys[0].x, 20);
+  assert.equal(session.view.actors[0].position.keys[0].x, 20);
   session.undo();
-  assert.equal(session.view.actors[0].keys[0].x, -5);
+  assert.equal(session.view.actors[0].position.keys[0].x, -5);
   assert.equal(session.canUndo, false);
 });
 
@@ -228,7 +229,7 @@ test('storage memigrasikan v1 lama saat dibaca dan menyimpan cadangan sumber', (
   const result = loadDocument(storage);
   assert.equal(result.migrated, true);
   assert.equal(result.error, null);
-  assert.equal(result.document.schemaVersion, 2);
+  assert.equal(result.document.schemaVersion, SCHEMA_VERSION);
   assert.equal(storage.getItem(BACKUP_KEY), raw, 'sumber v1 harus dicadangkan sebelum ditimpa');
   assert.equal(storage.getItem(STORAGE_KEY), raw, 'membaca tidak boleh menimpa sumber');
   saveDocument(result.document, storage);
@@ -248,4 +249,78 @@ test('storage rusak tidak ditimpa dan dilaporkan sebagai error', () => {
   assert.equal(storage.getItem(BACKUP_KEY), '{bukan json');
   assert.equal(storage.getItem(STORAGE_KEY), '{bukan json');
   assert.deepEqual(loadDocument(fakeStorage()), {document: null, migrated: false, error: null, backedUp: false});
+});
+
+// ---------------------------------------------------------------------------
+// Fase 4b (schema v3): props ber-ID, dinding modular dan interpolasi per track.
+// ---------------------------------------------------------------------------
+
+test('props dan dinding modular bolak-balik lewat scene view tanpa berubah', () => {
+  const doc = demoDocument();
+  const store = new DocumentStore(doc);
+  const propCount = store.view.props.length;
+  assert.ok(propCount > 0, 'dekorasi contoh sudah menjadi prop ber-ID');
+  store.view.props.push({id: 'p-baru', type: 'prop', shape: 'chair', name: 'Kursi tamu',
+    color: '#82958b', x: 1.5, y: 0.45, z: -2, r: 30, w: 0.5, d: 0.5, h: 0.9, locked: false, visible: true});
+  store.view.walls.push({id: 'w-baru', type: 'wall', name: 'Sekat', color: '#b8bcae',
+    x: 0, z: 3, r: 90, length: 4, height: 2.6, thickness: 0.12, locked: false, visible: true});
+  const snapshot = store.snapshot();
+  validateDocument(snapshot);
+  const setObjects = snapshot.scenes[0].setObjects;
+  // Urutan dokumen: ruangan, prop, lalu dinding — sama dengan yang ditulis migrasi.
+  assert.deepEqual([...new Set(setObjects.map(o => o.type))], ['room', 'prop', 'wall']);
+  assert.equal(setObjects.filter(o => o.type === 'prop').length, propCount + 1);
+  assert.equal(setObjects.filter(o => o.type === 'wall').length, 1);
+  // Membaca ulang menghasilkan objek yang sama persis (tidak ada field yang hilang).
+  const reread = readSceneView(snapshot);
+  assert.deepEqual(reread.props.at(-1), store.view.props.at(-1));
+  assert.deepEqual(reread.walls[0], store.view.walls[0]);
+  // Ruangan tetap berarti "ruangan": prop tidak boleh bocor ke `rooms`.
+  assert.equal(reread.rooms.length, 3);
+  assert.ok(reread.rooms.every(r => r.doors !== undefined));
+});
+
+test('prop dan dinding tidak valid ditolak validator tanpa menyentuh dokumen aktif', () => {
+  const store = new DocumentStore(demoDocument());
+  const before = clone(store.doc);
+  for (const broken of [
+    {id: 'p1', type: 'prop', shape: 'sofa', name: 'X', color: '#ffffff', x: 0, y: 0, z: 0, r: 0, w: 1, d: 1, h: 1, locked: false, visible: true},
+    {id: 'p2', type: 'prop', shape: 'box', name: 'X', color: '#ffffff', x: 0, y: 99, z: 0, r: 0, w: 1, d: 1, h: 1, locked: false, visible: true},
+    {id: 'w1', type: 'wall', name: 'X', color: '#ffffff', x: 0, z: 0, r: 0, length: 0, height: 2, thickness: 0.1, locked: false, visible: true},
+  ]) {
+    const doc = clone(store.doc);
+    doc.scenes[0].setObjects.push(broken);
+    assert.throws(() => validateDocument(doc));
+  }
+  assert.deepEqual(store.doc, before);
+});
+
+test('interpolasi track: hold menahan nilai, ease sama di keyframe dan berbeda di antaranya', () => {
+  const store = new DocumentStore(demoDocument());
+  const actor = store.view.actors[0];
+  const linear = sampleScene(store.view, 2.5).actors[0].pose;
+  actor.position.interpolation = 'hold';
+  const held = sampleScene(store.view, 2.5).actors[0].pose;
+  assert.equal(held.x, actor.position.keys[0].x, 'hold menahan nilai keyframe sebelumnya');
+  assert.notEqual(held.x, linear.x);
+  assert.equal(held.r, linear.r, 'interpolasi posisi tidak menyentuh orientasi');
+
+  actor.position.interpolation = 'ease';
+  // t = 1.25 dipilih sengaja: pada titik tengah segmen smoothstep bernilai sama dengan
+  // linear, jadi memakai 2,5 detik tidak akan membuktikan apa pun.
+  actor.position.interpolation = 'linear';
+  const linearQuarter = sampleScene(store.view, 1.25).actors[0].pose;
+  actor.position.interpolation = 'ease';
+  const eased = sampleScene(store.view, 1.25).actors[0].pose;
+  assert.notEqual(eased.x, linearQuarter.x);
+  for (const key of actor.position.keys) {
+    const at = sampleScene(store.view, key.t).actors[0].pose;
+    assert.ok(Math.abs(at.x - key.x) < 1e-9, 'nilai di keyframe tetap sama persis untuk semua interpolasi');
+  }
+  // Interpolasi tersimpan pada track, bukan pada objek.
+  const snapshot = store.snapshot();
+  validateDocument(snapshot);
+  const track = snapshot.scenes[0].shots[0].tracks.find(t => t.objectId === actor.id && t.property === 'position');
+  assert.equal(track.interpolation, 'ease');
+  assert.equal(readSceneView(snapshot).actors[0].rotation.interpolation, 'linear');
 });

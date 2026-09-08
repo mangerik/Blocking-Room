@@ -162,6 +162,11 @@ await page.locator(`[data-shot-open="${(await shots())[0].id}"]`).click();
 await page.locator('[data-select="a1"]').click();
 const originalKeys = (await project()).actors[0].keys;
 assert.deepEqual(originalKeys.map(k => k.t), [0, 5, 12]);
+// F4-05 (schema v3): satu LANE per track — dua per aktor. `.key` pertama dan kedua
+// berada pada lane POSISI aktor pertama, jadi drag di bawah ini menggeser posisi
+// tanpa menyentuh orientasi. Itulah inti TL-02, dan diasersikan secara eksplisit.
+const originalPosition = (await project()).actors[0].position.keys;
+const originalRotation = (await project()).actors[0].rotation.keys;
 // Klik penanda pertama, lalu Shift-klik penanda kedua: dua keyframe terpilih.
 await page.locator('.key').nth(0).click();
 await page.locator('.key').nth(1).click({modifiers: ['Shift']});
@@ -172,12 +177,14 @@ await page.mouse.move(grab.x, grab.y);
 await page.mouse.down();
 await page.mouse.move(grab.x + 70, grab.y, {steps: 8});
 await page.mouse.up();
-const dragged = (await project()).actors[0].keys;
-const shift = dragged[0].t - originalKeys[0].t;
+const dragged = (await project()).actors[0].position.keys;
+const shift = dragged[0].t - originalPosition[0].t;
 assert.ok(shift > 0.2, `keyframe harus benar-benar bergeser (shift=${shift})`);
-assert.ok(Math.abs((dragged[1].t - originalKeys[1].t) - shift) < 1e-9, 'seluruh seleksi bergeser sama jauh');
-assert.deepEqual(dragged[2], originalKeys[2], 'keyframe yang tidak terpilih tidak ikut bergeser');
+assert.ok(Math.abs((dragged[1].t - originalPosition[1].t) - shift) < 1e-9, 'seluruh seleksi bergeser sama jauh');
+assert.deepEqual(dragged[2], originalPosition[2], 'keyframe yang tidak terpilih tidak ikut bergeser');
 assert.ok(Math.abs(dragged[0].t * 24 - Math.round(dragged[0].t * 24)) < 1e-9, 'hasil drag jatuh tepat di frame');
+assert.deepEqual((await project()).actors[0].rotation.keys, originalRotation,
+  'TL-02: menggeser keyframe posisi tidak boleh menyentuh track orientasi');
 assert.match(await toast(), /keyframe digeser/);
 await page.locator('#undo').click();
 assert.deepEqual((await project()).actors[0].keys, originalKeys, 'operasi massal = satu langkah undo');
@@ -185,13 +192,15 @@ assert.deepEqual((await project()).actors[0].keys, originalKeys, 'operasi massal
 // Salin/tempel pada playhead, termasuk aturan replace yang terlihat.
 await BR(() => window.blockingRoom.selectKeys([{id: 'a1', t: 0}]));
 await page.locator('#key-copy').click();
-assert.match(await toast(), /1 keyframe disalin/);
+// v3: satu ID objek berarti seluruh track objek itu — posisi dan orientasi.
+assert.match(await toast(), /2 keyframe disalin/);
 await BR(() => window.blockingRoom.setFrame(48));
 await page.locator('#key-paste').click();
 assert.equal((await project()).actors[0].keys.length, 4);
 await BR(() => window.blockingRoom.setFrame(120)); // 5 detik: sudah ada keyframe di sana
 await page.locator('#key-paste').click();
-assert.match(await toast(), /keyframe lama diganti: Alex pada frame 120/);
+// v3: nama lane memuat properti track ("Alex · Posisi"), bukan hanya nama objek.
+assert.match(await toast(), /keyframe lama diganti: Alex · Posisi pada frame 120/);
 assert.equal((await project()).actors[0].keys.length, 4, 'tabrakan mengganti, bukan menambah waktu ganda');
 await page.locator('#undo').click();
 await page.locator('#undo').click();
@@ -201,14 +210,14 @@ assert.deepEqual((await project()).actors[0].keys, originalKeys);
 await BR(() => window.blockingRoom.selectKeys([{id: 'a1', t: 5}, {id: 'a1', t: 12}]));
 await page.locator('#key-delete').click();
 assert.deepEqual((await project()).actors[0].keys.map(k => k.t), [0]);
-assert.match(await toast(), /2 keyframe dihapus/);
+assert.match(await toast(), /4 keyframe dihapus/); // 2 waktu × 2 track (posisi + orientasi)
 await page.locator('#undo').click();
 assert.deepEqual((await project()).actors[0].keys, originalKeys);
 await page.locator('[data-lock="a2"]').click();
 const lockedBefore = (await project()).actors[1].keys;
 await BR(() => window.blockingRoom.selectKeys([{id: 'a2', t: 0}]));
 await page.locator('#key-delete').click();
-assert.match(await toast(), /dilewati: Maya \(terkunci\)/);
+assert.match(await toast(), /dilewati: Maya · Posisi \(terkunci\)/);
 assert.deepEqual((await project()).actors[1].keys, lockedBefore, 'keyframe objek terkunci tidak tersentuh');
 await page.locator('[data-lock="a2"]').click();
 
@@ -336,7 +345,109 @@ await BR(() => window.blockingRoom.setFrame(10));
 assert.deepEqual(await BR(() => window.blockingRoom.getObjectState('a1')), poseAt10,
   'pose pada frame yang sama identik setelah reload');
 
+// =========================================================================
+// 11. Fase 4b — F4-05 (interpolasi per track), F4-07 (props), F4-08 (dinding)
+// =========================================================================
+const props = () => BR(() => window.blockingRoom.getProps());
+// Bagian 10 memuat ulang halaman dan dapat meninggalkan shot alternatif (yang track
+// aktornya hanya satu keyframe) sebagai shot aktif. Bagian ini memerlukan gerakan
+// nyata, jadi shot pertama dijadikan aktif lebih dahulu.
+await BR(() => window.blockingRoom.switchShot(window.blockingRoom.getShots()[0].id));
+await page.locator('[data-tab="actors"]').click();
+await page.locator('[data-select="a1"]').click();
+assert.ok((await project()).actors[0].position.keys.length >= 2, 'shot pertama punya gerakan');
+
+// F4-07: dekorasi contoh lama kini prop ber-ID, dan pose dunianya sama dengan
+// yang digambar renderer sebelum migrasi (pusat ruangan + offset lokal).
+const migrated = await props();
+assert.ok(migrated.length >= 15, `dekorasi contoh menjadi prop ber-ID (${migrated.length})`);
+const sofa = migrated.find(p => p.name === 'Sofa foyer');
+assert.ok(sofa, 'prop hasil migrasi punya nama');
+const sofaMesh = await BR(id => window.blockingRoom.getObjectState(id), sofa.id);
+assert.ok(Math.abs(sofaMesh.position[0] - sofa.x) < 1e-9 && Math.abs(sofaMesh.position[2] - sofa.z) < 1e-9,
+  'posisi dunia prop di renderer sama dengan dokumen');
+assert.ok(Math.abs(sofaMesh.position[0] - (-5 - 6 * 0.22)) < 1e-9, 'pose visual identik dengan dekorasi v2');
+
+// Props memakai daftar objek, inspector, lock/hide, duplikasi dan undo yang sama.
+await page.locator('[data-tab="props"]').click();
+assert.equal(await page.locator('#objects .object').count(), migrated.length);
+await page.locator(`[data-select="${sofa.id}"]`).click();
+await page.locator('[data-prop="x"]').fill('3');
+await page.locator('[data-prop="x"]').press('Tab');
+assert.equal((await props()).find(p => p.id === sofa.id).x, 3);
+await page.locator('#undo').click();
+assert.equal((await props()).find(p => p.id === sofa.id).x, sofa.x, 'transform prop dapat dibatalkan');
+await page.locator(`[data-lock="${sofa.id}"]`).click();
+assert.equal(await page.locator('[data-prop="x"]').isDisabled(), true, 'prop terkunci tidak dapat diedit');
+await page.locator(`[data-lock="${sofa.id}"]`).click();
+await page.locator(`[data-visible="${sofa.id}"]`).click();
+assert.equal((await BR(id => window.blockingRoom.getObjectState(id), sofa.id)).visible, false);
+await page.locator('#undo').click();
+const duplicated = await BR(id => window.blockingRoom.duplicateProp(id), sofa.id);
+assert.equal((await props()).length, migrated.length + 1);
+await page.locator('#undo').click();
+assert.equal((await props()).length, migrated.length, 'duplikasi prop dapat dibatalkan');
+
+// Prop baru lewat UI daftar objek, lalu dihapus dan dipulihkan.
+const newProp = await BR(() => window.blockingRoom.addProp('chair'));
+assert.equal((await props()).length, migrated.length + 1);
+assert.equal((await props()).find(p => p.id === newProp).shape, 'chair');
+await page.locator('#delete-object').click();
+assert.equal((await props()).length, migrated.length);
+await page.locator('#undo').click();
+assert.equal((await props()).length, migrated.length + 1, 'hapus prop dapat dibatalkan');
+await page.locator('#undo').click();
+
+// F4-08: dinding modular memberi PERINGATAN tembus, bukan tabrakan fisik.
+assert.equal(await BR(() => window.blockingRoom.getPathWarning()), null);
+const wallId = await BR(() => window.blockingRoom.addProp('wall'));
+await page.locator('[data-prop="x"]').fill('-3');
+await page.locator('[data-prop="x"]').press('Tab');
+await page.locator('[data-prop="z"]').fill('2');
+await page.locator('[data-prop="z"]').press('Tab');
+const warning = await BR(() => window.blockingRoom.getPathWarning());
+assert.match(warning ?? '', /dinding modular/, `dinding modular harus memicu peringatan (${warning})`);
+// Peringatan tetap peringatan: gerakan aktor tidak diubah sama sekali.
+const beforeWallDelete = (await project()).actors[0].position.keys;
+await page.locator(`[data-select="${wallId}"]`).click();
+await page.locator('#delete-object').click();
+assert.equal(await BR(() => window.blockingRoom.getPathWarning()), null);
+assert.deepEqual((await project()).actors[0].position.keys, beforeWallDelete);
+// Empat langkah undo: hapus dinding, ubah z, ubah x, tambah dinding.
+for (let i = 0; i < 4; i += 1) await page.locator('#undo').click();
+assert.equal((await props()).length, migrated.length, 'scene kembali ke keadaan semula');
+assert.equal(await BR(() => window.blockingRoom.getPathWarning()), null);
+
+// F4-05: interpolasi per track tersimpan pada dokumen dan mengubah hasil sampling.
+await page.locator('[data-tab="actors"]').click();
+await page.locator('[data-select="a1"]').click();
+await BR(() => window.blockingRoom.setFrame(30));
+const linearPose = await BR(() => window.blockingRoom.getObjectState('a1'));
+assert.equal(await BR(() => window.blockingRoom.setInterpolation('a1', 'position', 'hold')), 'hold');
+const heldPose = await BR(() => window.blockingRoom.getObjectState('a1'));
+assert.notDeepEqual(heldPose.position, linearPose.position, 'hold mengubah posisi hasil sampling');
+assert.equal(heldPose.rotation, linearPose.rotation, 'interpolasi posisi tidak menyentuh orientasi');
+const activeNow = await BR(() => window.blockingRoom.getActiveShotId());
+const heldTrack = (await shots()).find(sh => sh.id === activeNow).tracks
+  .find(t => t.objectId === 'a1' && t.property === 'position');
+assert.equal(heldTrack.interpolation, 'hold', 'interpolasi tersimpan pada track dokumen');
+await BR(() => window.blockingRoom.setInterpolation('a1', 'position', 'linear'));
+assert.deepEqual((await BR(() => window.blockingRoom.getObjectState('a1'))).position, linearPose.position);
+
+// Pilihan track saat menambah keyframe: "orientasi saja" tidak boleh membuat
+// keyframe posisi baru.
+await BR(() => window.blockingRoom.setFrame(60));
+const beforeTargeted = (await project()).actors[0];
+assert.equal(await BR(() => window.blockingRoom.setKeyTarget('rotation')), 'rotation');
+await page.locator('#add-key').click();
+const afterTargeted = (await project()).actors[0];
+assert.equal(afterTargeted.position.keys.length, beforeTargeted.position.keys.length,
+  'menyimpan keyframe orientasi tidak menambah keyframe posisi');
+assert.equal(afterTargeted.rotation.keys.length, beforeTargeted.rotation.keys.length + 1);
+await page.locator('#undo').click();
+await BR(() => window.blockingRoom.setKeyTarget('both'));
+
 await page.screenshot({path: 'artifacts/shot-timeline.png'});
 assert.deepEqual(errors, [], `tidak boleh ada error browser: ${errors.join(' | ')}`);
-console.log('PASS Fase 4: cue Edit/Play/Record, frame ruler + snapping + zoom/pan + playhead presisi, dua alternatif shot terisolasi (lensa/aspect/fps/keyframe), perbandingan A/B, duplicate shot, keyframe massal satu undo + lock + aturan replace, rotasi terpisah, langkah deterministik, pintu, target kamera dihapus, shot tanpa kamera, shot aktif pulih setelah reload.');
+console.log('PASS Fase 4: cue Edit/Play/Record, frame ruler + snapping + zoom/pan + playhead presisi, dua alternatif shot terisolasi (lensa/aspect/fps/keyframe), perbandingan A/B, duplicate shot, keyframe massal satu undo + lock + aturan replace, rotasi terpisah, langkah deterministik, pintu, target kamera dihapus, shot tanpa kamera, shot aktif pulih setelah reload; Fase 4b: props ber-ID (pose visual identik, transform/lock/hide/duplikasi/hapus + undo), dinding modular + peringatan tembus, interpolasi per track dan pilihan track keyframe.');
 await browser.close();

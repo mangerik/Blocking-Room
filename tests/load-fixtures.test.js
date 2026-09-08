@@ -6,6 +6,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync, statSync} from 'node:fs';
 import {LIMITS, validateDocument} from '../src/schema.js';
+import {openProjectData} from '../src/migrate.js';
 import {readSceneView} from '../src/document.js';
 import {sampleScene} from '../src/timeline-engine.js';
 import {
@@ -72,17 +73,28 @@ test('fixture beban memakai kamera bertarget dan objek terkunci/tersembunyi', ()
   assert.ok(withDoors.some(r => r.doors.length === 2), 'satu ruang harus punya dua pintu');
 });
 
-test('fixture beban lolos validateDocument tanpa mengubah keyframe', () => {
+// Fixture beban dibekukan sebagai dokumen v2 (lihat generate.mjs), jadi ia dibuka
+// lewat `openProjectData`. Asersi lama "tracks tidak berubah" tidak lagi berlaku
+// apa adanya — v3 memecah tiap track pose aktor menjadi position+rotation — dan
+// diganti dengan asersi yang lebih kuat: gabungan kedua track hasil migrasi harus
+// sama persis dengan keyframe pose v2, dan sumbernya tidak boleh dimutasi.
+test('fixture beban dibuka lewat openProjectData tanpa mengubah keyframe', () => {
   const raw = readJson(LOAD_FILE);
   const before = structuredClone(raw);
-  const doc = validateDocument(raw);
-  assert.deepEqual(doc.scenes[0].shots[0].tracks, before.scenes[0].shots[0].tracks);
+  const doc = openProjectData(raw).document;
+  assert.deepEqual(raw, before, 'copy-first: sumber tidak boleh dimutasi');
+  const view = readSceneView(doc);
+  for (const track of before.scenes[0].shots[0].tracks) {
+    const actor = view.actors.find(a => a.id === track.objectId);
+    if (!actor) continue;
+    assert.deepEqual(actor.keys, track.keys, `gerak ${track.objectId} berubah setelah migrasi`);
+  }
   assert.ok(bytes(LOAD_FILE) < LIMITS.documentBytes,
     `fixture beban ${bytes(LOAD_FILE)} B harus di bawah LIMITS.documentBytes ${LIMITS.documentBytes} B`);
 });
 
 test('sampleScene pada beban referensi berjalan di t=0, tengah dan akhir serta deterministik', () => {
-  const doc = validateDocument(readJson(LOAD_FILE));
+  const doc = openProjectData(readJson(LOAD_FILE)).document;
   const view = readSceneView(doc);
   assert.equal(view.actors.length, LOAD_SPEC.actors);
   assert.equal(view.duration, LOAD_SPEC.duration);
@@ -118,7 +130,7 @@ test('korpus dashboard berisi 100 dokumen v2 valid dengan ID unik dan ukuran ≤
   const size = bytes(CORPUS_FILE);
   assert.ok(size <= CORPUS_SPEC.maxBytes, `korpus ${size} B melewati batas ${CORPUS_SPEC.maxBytes} B`);
   for (const project of projects) {
-    validateDocument(structuredClone(project));
+    openProjectData(structuredClone(project));
     assert.ok(project.scenes.length >= 1 && project.scenes.length <= 3);
     assert.ok(JSON.stringify(project).length < LIMITS.documentBytes);
   }

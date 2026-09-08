@@ -37,6 +37,8 @@ export const ENUMS = {
     // Fase 4 — shot list dan timeline lanjutan.
     'shot_add', 'shot_duplicate', 'shot_move', 'shot_remove', 'shot_rename', 'shot_switch', 'shot_settings',
     'keyframe_move', 'keyframe_copy', 'keyframe_paste', 'keyframe_delete', 'camera_preset', 'focal_key',
+    // Fase 4b (schema v3) — track per properti, props ber-ID dan dinding modular.
+    'track_interpolation', 'add_prop', 'duplicate_prop',
   ],
   source: ['pointer', 'keyboard', 'inspector', 'list', 'timeline', 'dashboard', 'menu', 'file'],
   direction: ['undo', 'redo'],

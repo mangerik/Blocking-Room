@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {DEFAULT_FLAGS, FLAG_PREFIX, allFlags, readFlag, setFlag} from '../src/flags.js';
-import {exportAsV1, migrateV1ToV2, openProjectData} from '../src/migrate.js';
+import {V2_SCHEMA_VERSION, exportAsV1, exportAsV2, migrateV2ToV3, openProjectData} from '../src/migrate.js';
 import {capabilityWarnings, detectCapabilities} from '../src/capabilities.js';
+import {sample, validateProject} from '../src/model.js';
 
 function fakeStorage({broken = false} = {}) {
   const map = new Map();
@@ -62,14 +63,37 @@ test('allFlags mengembalikan seluruh flag yang dikenal', () => {
 
 // ---------------------------------------------------------------- ekspor v1
 test('exportAsV1 mengembalikan dokumen v1 yang setara dengan sumbernya', () => {
-  const doc = migrateV1ToV2(v1);
+  const doc = openProjectData(structuredClone(v1)).document;
   const {data, dropped} = exportAsV1(doc);
-  assert.deepEqual(data, v1, 'v1 → v2 → v1 harus setara');
-  assert.deepEqual(dropped, []);
+  assert.deepEqual(data, v1, 'v1 → v3 → v1 harus setara');
+  // v3 mengubah dekorasi contoh menjadi prop ber-ID; format v1 tidak mengenalnya,
+  // jadi ia HARUS disebutkan pada daftar yang tidak terbawa (bukan hilang diam-diam).
+  assert.deepEqual(dropped, [`${doc.scenes[0].setObjects.filter(o => o.type === 'prop').length} prop`]);
+});
+
+// Fase 4b: v3 memecah gerak aktor menjadi dua track. Ekspor balik ke v1 karena itu
+// harus MENGGABUNGKANNYA kembali, termasuk ketika posisi dan orientasi di-key pada
+// waktu yang berbeda — kalau tidak, gerak yang sudah dibuat pengguna akan hilang.
+test('exportAsV1 menggabungkan track posisi dan orientasi yang di-key pada waktu berbeda', () => {
+  const doc = openProjectData(structuredClone(v1)).document;
+  const shot = doc.scenes[0].shots[0];
+  const position = shot.tracks.find(t => t.objectId === 'a1' && t.property === 'position');
+  const rotation = shot.tracks.find(t => t.objectId === 'a1' && t.property === 'rotation');
+  rotation.keys.push({t: 3, r: 45});
+  rotation.keys.sort((a, b) => a.t - b.t);
+  const {data} = exportAsV1(doc);
+  const actor = data.actors.find(a => a.id === 'a1');
+  assert.deepEqual(actor.keys.map(k => k.t), [0, 3, 5, 12], 'waktu gabungan adalah union kedua track');
+  assert.equal(actor.keys.find(k => k.t === 3).r, 45);
+  assert.ok(Math.abs(actor.keys.find(k => k.t === 3).x - sample(position.keys, 3).x) < 1e-12,
+    'posisi pada waktu baru diambil dari sampling track posisi');
+  // Hasilnya tetap JSON v1 yang sah dan dapat dibuka build lama.
+  validateProject(structuredClone(data));
+  assert.equal(openProjectData(structuredClone(data)).sourceVersion, 1);
 });
 
 test('exportAsV1 tidak memutasi dokumen v2 sumber', () => {
-  const doc = migrateV1ToV2(v1);
+  const doc = openProjectData(structuredClone(v1)).document;
   const before = JSON.stringify(doc);
   const {data} = exportAsV1(doc);
   data.actors[0].name = 'diubah';
@@ -78,7 +102,7 @@ test('exportAsV1 tidak memutasi dokumen v2 sumber', () => {
 });
 
 test('exportAsV1 menyebutkan apa yang tidak terbawa ke format lama', () => {
-  const doc = migrateV1ToV2(v1);
+  const doc = openProjectData(structuredClone(v1)).document;
   const second = JSON.parse(JSON.stringify(doc.scenes[0]));
   second.id = 'scene-2';
   second.order = 1;
@@ -94,7 +118,7 @@ test('exportAsV1 menyebutkan apa yang tidak terbawa ke format lama', () => {
 });
 
 test('hasil exportAsV1 dapat dibuka kembali oleh openProjectData sebagai v1', () => {
-  const doc = migrateV1ToV2(v1);
+  const doc = openProjectData(structuredClone(v1)).document;
   const {data} = exportAsV1(doc);
   const reopened = openProjectData(data);
   assert.equal(reopened.migrated, true);
@@ -103,7 +127,7 @@ test('hasil exportAsV1 dapat dibuka kembali oleh openProjectData sebagai v1', ()
 });
 
 test('exportAsV1 memilih scene dan shot tertentu', () => {
-  const doc = migrateV1ToV2(v1);
+  const doc = openProjectData(structuredClone(v1)).document;
   const second = JSON.parse(JSON.stringify(doc.scenes[0]));
   second.id = 'scene-2';
   second.order = 1;
@@ -146,4 +170,39 @@ test('browser lengkap tidak menghasilkan peringatan', () => {
     mediaRecorder: {supported: true, preferred: 'video/webm;codecs=vp9'},
   };
   assert.deepEqual(capabilityWarnings(caps), []);
+});
+
+// ---------------------------------------------------------------- ekspor v2 (rollback R1)
+// `docs/ROLLOUT.md` §6 menetapkan ini sebagai syarat rilis schema v3: build R1 hanya
+// mengenal v2, sedangkan `exportAsV1` hanya memuat satu scene dan satu shot.
+test('exportAsV2 mengembalikan dokumen v2 yang setara dan tidak memutasi sumbernya', () => {
+  const doc = openProjectData(structuredClone(v1)).document;
+  const before = JSON.stringify(doc);
+  const {data, dropped} = exportAsV2(doc);
+  assert.equal(JSON.stringify(doc), before, 'dokumen v3 sumber tidak boleh berubah');
+  assert.equal(data.schemaVersion, V2_SCHEMA_VERSION);
+  assert.equal(data.id, doc.id, 'seluruh ID dipertahankan');
+  assert.equal(data.scenes.length, doc.scenes.length);
+  // Prop hasil migrasi tidak dikenal v2 dan disebutkan, bukan hilang diam-diam.
+  assert.ok(data.scenes[0].setObjects.every(o => o.type === 'room'));
+  assert.deepEqual(dropped, [`${doc.scenes[0].setObjects.filter(o => o.type === 'prop').length} prop`]);
+  // Track digabung kembali menjadi satu track pose per aktor + satu track kamera.
+  const shot = data.scenes[0].shots[0];
+  assert.ok(shot.tracks.every(t => t.property === 'pose'));
+  assert.equal(shot.tracks.length, data.scenes[0].actors.length + 1);
+  // Naik lagi ke v3 menghasilkan gerak yang sama persis (v3 → v2 → v3 setara).
+  const back = migrateV2ToV3(structuredClone(data));
+  for (const property of ['position', 'rotation']) {
+    const original = doc.scenes[0].shots[0].tracks.filter(t => t.property === property);
+    const roundtrip = back.scenes[0].shots[0].tracks.filter(t => t.property === property);
+    assert.deepEqual(roundtrip.map(t => t.keys), original.map(t => t.keys), property);
+  }
+});
+
+test('exportAsV2 menyebut interpolasi non-linear yang diturunkan', () => {
+  const doc = openProjectData(structuredClone(v1)).document;
+  doc.scenes[0].shots[0].tracks.find(t => t.property === 'position').interpolation = 'ease';
+  const {data, dropped} = exportAsV2(doc);
+  assert.ok(dropped.some(text => text.includes('non-linear')));
+  assert.ok(data.scenes[0].shots[0].tracks.every(t => t.interpolation === 'linear'));
 });

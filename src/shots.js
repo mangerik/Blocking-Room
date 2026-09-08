@@ -28,8 +28,8 @@ export function nextShotName(scene, base) {
   return preferred;
 }
 
-const seedKey = (shot, objectId, fallback) => {
-  const key = shot?.tracks.find(t => t.objectId === objectId)?.keys?.[0];
+const seedKey = (shot, objectId, fallback, property = 'pose') => {
+  const key = shot?.tracks.find(t => t.objectId === objectId && t.property === property)?.keys?.[0];
   return key ? {...clone(key), t: 0} : {...fallback, t: 0};
 };
 
@@ -48,10 +48,17 @@ export function addShot(scene, {id = newId, name, from, duration, fps, aspectRat
     aspectRatio: aspectRatio ?? source?.aspectRatio ?? DEFAULT_ASPECT_RATIO,
     notes: '', cameraId: null, camera: null, tracks: [],
   };
+  // v3 (F4-05): dua track independen per aktor. Urutan position lalu rotation sama
+  // dengan `document.js#writeSceneView`, sehingga dokumen tidak berubah bentuk saat
+  // shot baru disimpan.
   for (const actor of scene.actors) {
     shot.tracks.push({
-      objectId: actor.id, property: 'pose', interpolation: 'linear',
-      keys: [seedKey(source, actor.id, {x: 0, z: 0, r: 0})],
+      objectId: actor.id, property: 'position', interpolation: 'linear',
+      keys: [seedKey(source, actor.id, {x: 0, z: 0}, 'position')],
+    });
+    shot.tracks.push({
+      objectId: actor.id, property: 'rotation', interpolation: 'linear',
+      keys: [seedKey(source, actor.id, {r: 0}, 'rotation')],
     });
   }
   if (withCamera && source?.camera) {

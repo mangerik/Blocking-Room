@@ -8,6 +8,7 @@
 //   4. Feature flag dashboard mati → rute dashboard langsung membuka editor.
 //   5. Ekspor kompatibel v1 dari editor (rollback aplikasi).
 import {chromium} from '@playwright/test';
+import {SCHEMA_VERSION} from '../src/schema.js';
 import assert from 'node:assert/strict';
 import {mkdir, readFile} from 'node:fs/promises';
 
@@ -94,7 +95,7 @@ async function newPage(context) {
   const file = await download;
   await file.saveAs('artifacts/fallback-project.json');
   const exported = JSON.parse(await readFile('artifacts/fallback-project.json', 'utf8'));
-  assert.equal(exported.schemaVersion, 2);
+  assert.equal(exported.schemaVersion, SCHEMA_VERSION);
   assert.ok(exported.scenes.length >= 1);
 
   // Dashboard tetap dapat dibuka tanpa WebGL.

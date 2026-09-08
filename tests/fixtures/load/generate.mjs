@@ -18,7 +18,14 @@
 import {writeFileSync, mkdirSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {SCHEMA_VERSION, validateDocument} from '../../../src/schema.js';
+import {validateDocument} from '../../../src/schema.js';
+import {openProjectData} from '../../../src/migrate.js';
+
+// Fixture beban sengaja DIBEKUKAN pada `schemaVersion: 2` (bukan `SCHEMA_VERSION`).
+// Dua alasan: (a) berkasnya tidak perlu ditulis ulang setiap kali schema naik, dan
+// (b) ia menjadi bukti nyata bahwa dokumen v2 berukuran produksi milik pengguna
+// masih dapat dibuka lewat `openProjectData`. Uji membukanya lewat migrator.
+const SCHEMA_VERSION = 2;
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -304,6 +311,8 @@ export const CORPUS_FILE = 'projects-100.json';
 /** Serialisasi persis seperti yang tersimpan di disk (dipakai test kesetaraan). */
 export const serializeLoad = doc => JSON.stringify(doc, null, 2) + '\n';
 export const serializeCorpus = list => JSON.stringify(list) + '\n';
+
+export const openLoadDocument = raw => openProjectData(raw).document;
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   mkdirSync(here, {recursive: true});

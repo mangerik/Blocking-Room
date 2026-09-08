@@ -63,7 +63,7 @@ tidak pernah ditimpa.
 
 | Kunci localStorage | Isi | Kapan ditulis |
 |---|---|---|
-| `blocking-room` | dokumen lama (v1 atau v2) | **tidak pernah** disentuh oleh migrasi; ini sumber aslinya |
+| `blocking-room` | dokumen lama (v1, v2 atau v3) | **tidak pernah** disentuh oleh migrasi; ini sumber aslinya |
 | `blocking-room.backup` | salinan **mentah** teks sumber sebelum apa pun dipakai | sebelum dokumen hasil migrasi dipakai, dan juga ketika sumber gagal dibaca |
 | `blocking-room.migrated` | id proyek hasil migrasi | **hanya setelah** transaksi IndexedDB commit — sehingga migrasi ulang tidak pernah membuat proyek duplikat |
 | `blocking-room.activeProject` | id proyek yang dibuka editor | setiap kali proyek dibuka |
@@ -79,7 +79,7 @@ Isinya adalah **teks JSON mentah persis seperti sebelum migrasi** — bukan form
 // di console browser pada origin aplikasi
 const raw = localStorage.getItem('blocking-room.backup');
 JSON.parse(raw).version;   // 1  → JSON v1, dapat dibuka build lama maupun build baru
-JSON.parse(raw).schemaVersion; // 2 → dokumen v2
+JSON.parse(raw).schemaVersion; // 2 → dokumen v2, 3 → dokumen v3
 copy(raw);                 // salin ke clipboard, simpan sebagai .json
 ```
 
@@ -97,7 +97,7 @@ Empat jalur, dari yang paling lengkap ke yang paling kompatibel:
 | Jalur | Isi | Untuk apa |
 |---|---|---|
 | **Ekspor paket** (dashboard, `.blockingroom.json`) | manifest + dokumen + aset + checksum SHA-256 per bagian | memindahkan proyek utuh antar-perangkat |
-| **Simpan proyek** (editor, tombol unduh) | dokumen v2 lengkap | cadangan cepat satu proyek |
+| **Simpan proyek** (editor, tombol unduh) | dokumen versi terkini (v3) lengkap | cadangan cepat satu proyek |
 | **Unduh JSON v1** (editor → Riwayat versi → "Unduh JSON v1") | scene + shot aktif dalam format v1 | **rollback ke build lama** |
 | **Unduh cadangan** (editor, muncul saat penyimpanan gagal) | dokumen yang ada di memori | menyelamatkan pekerjaan saat IndexedDB bermasalah |
 
@@ -130,7 +130,11 @@ thumbnail, dan aset. Format v1 memang hanya menampung satu scene dan satu shot.
    `error_code`, tanpa isi karya.
 3. **Kembalikan `dist/` ke build stabil sebelumnya.** Karena aplikasi statis, ini satu
    langkah dan tidak menyentuh data pengguna.
-4. **Jangan menghapus apa pun di IndexedDB.** Build R1 lama membaca schema v2 yang sama.
+4. **Jangan menghapus apa pun di IndexedDB.** Build R1 lama membaca schema v2; sejak Fase 4b
+   dokumen aktif berbentuk v3, jadi minta peserta menekan **"Riwayat versi → Unduh JSON v2
+   (build R1)"** lebih dahulu — berkas itulah yang dapat diimpor build lama, dan ia
+   mempertahankan seluruh scene, shot dan keyframe (yang hilang hanya prop, dinding modular
+   dan interpolasi non-linear, dan ketiganya disebutkan pada toast).
    Database `blocking-room` (store `projects`, `documents`, `revisions`, `assets`,
    `sessions`) dibiarkan utuh.
 5. **Bila harus mundur ke build R0 (pra-IndexedDB):** R0 hanya mengenal JSON v1 di
@@ -146,15 +150,15 @@ thumbnail, dan aset. Format v1 memang hanya menampung satu scene dan satu shot.
 |---|---|
 | Data v2 tidak dihapus oleh rollback | rollback hanya mengganti berkas statis; IndexedDB milik origin, bukan milik build |
 | Sumber v1 lama tetap ada | migrasi copy-first tidak pernah menghapus `blocking-room` |
-| Dokumen dari build lebih baru tidak dirusak build lama | `SchemaTooNewError`: dokumen dengan `schemaVersion > 2` **tidak dibuka dan tidak ditimpa**, autosave dimatikan untuk sesi itu |
-| Selalu ada berkas yang dapat dibaca build lama | `exportAsV1` + `blocking-room.backup` |
+| Dokumen dari build lebih baru tidak dirusak build lama | `SchemaTooNewError`: dokumen dengan `schemaVersion` di atas versi build **tidak dibuka dan tidak ditimpa**, autosave dimatikan untuk sesi itu |
+| Selalu ada berkas yang dapat dibaca build lama | `exportAsV2` (seluruh scene/shot, untuk build R1) + `exportAsV1` (satu scene/shot, untuk build R0) + `blocking-room.backup` |
 | Kegagalan tulis tidak mengklaim sukses | status "Tersimpan lokal" hanya muncul setelah transaksi IndexedDB commit |
 
 ## 6. Pembaca schema baru yang stabil
 
 Kontrak yang tidak boleh dilanggar tanpa menaikkan `SCHEMA_VERSION`:
 
-- `detectVersion()` mengenali `schemaVersion` (v2+) dan `version: 1` (v1). Bentuk lain
+- `detectVersion()` mengenali `schemaVersion` (v2 dan v3) dan `version: 1` (v1). Bentuk lain
   ditolak dengan pesan, bukan ditebak.
 - `openProjectData()` selalu meng-clone input, memvalidasi hasil, dan melempar bila gagal
   — pemanggil tetap memegang dokumen lamanya.
@@ -164,9 +168,12 @@ Kontrak yang tidak boleh dilanggar tanpa menaikkan `SCHEMA_VERSION`:
   yang ditulis build lebih baru tidak akan kehilangan field diam-diam, karena build lama
   menolaknya lebih dahulu lewat `SchemaTooNewError`.
 
-Saat menambah schema v3 nanti: naikkan `SCHEMA_VERSION`, tulis migrator v2 → v3 dengan
-aturan copy-first yang sama, tambahkan fixture baseline, dan **tambahkan `exportAsV2`**
-sebelum rilis — bukan sesudah.
+**Schema v3 sudah dilakukan (Fase 4b)** persis dengan aturan itu: `SCHEMA_VERSION = 3`,
+`migrateV2ToV3` copy-first, golden pose Fase 0 tetap dibandingkan, dan **`exportAsV2` ditambahkan
+bersama migrasinya** — bukan sesudah. Aturan yang sama berlaku untuk kenaikan versi berikutnya:
+tulis migrator dan penurun versinya dalam perubahan yang sama, dan lewatkan **setiap** titik
+yang membaca dokumen tersimpan melalui `openProjectData` (daftarnya di
+`docs/DATA-MODEL.md` §6).
 
 ## 7. Pemantauan selama pilot
 

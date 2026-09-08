@@ -1,4 +1,4 @@
-// Document state (schema v2) terpisah dari UI state.
+// Document state (schema v3) terpisah dari UI state.
 // Modul ini hanya mengurus dokumen dan selector scene/shot aktif; seleksi, playhead,
 // tool dan pose observer adalah UI state milik main.js dan tidak pernah masuk ke sini.
 //
@@ -7,6 +7,7 @@
 // aktif tersebut, sehingga scene lain tidak mungkin ikut termutasi.
 import {SCHEMA_VERSION, newId, nowStamp, validateDocument} from './schema.js';
 import {DEFAULT_ASPECT_RATIO, DEFAULT_FPS} from './migrate.js';
+import {combineTracks} from './timeline-engine.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 
@@ -17,7 +18,17 @@ export const activeShot = doc => {
   const scene = activeScene(doc);
   return scene ? (findShot(scene, scene.activeShotId) ?? scene.shots[0] ?? null) : null;
 };
-const trackOf = (shot, objectId) => shot.tracks.find(t => t.objectId === objectId) ?? null;
+const trackOf = (shot, objectId, property = 'pose') =>
+  shot.tracks.find(t => t.objectId === objectId && t.property === property) ?? null;
+/** Nilai keyframe awal sebuah track baru, per properti. */
+export const TRACK_SEED = {
+  position: {x: 0, z: 0},
+  rotation: {r: 0},
+  pose: {x: 0, y: 2, z: 6, tx: 0, ty: 1.2, tz: 0},
+};
+/** Track kosong yang valid untuk sebuah properti. */
+export const emptyTrack = (objectId, property) =>
+  ({objectId, property, interpolation: 'linear', keys: [{...TRACK_SEED[property], t: 0}]});
 
 /** Dokumen v2 kosong dengan satu scene dan satu shot default. */
 export function emptyDocument({title = 'Scene tanpa judul', duration = 12, id = newId, now = nowStamp} = {}) {
@@ -42,20 +53,48 @@ export function readSceneView(doc, sceneId = doc.activeSceneId, shotId) {
   const scene = findScene(doc, sceneId) ?? doc.scenes[0];
   const shot = findShot(scene, shotId ?? scene.activeShotId) ?? scene.shots[0];
   const keysOf = objectId => clone(trackOf(shot, objectId)?.keys ?? []);
+  // v3 (F4-05): aktor membawa DUA track independen. `keys` gabungan tetap ada sebagai
+  // cache turunan — jalur di viewport, langkah kaki, peringatan tembus dinding dan
+  // ekspor v1 bekerja pada JALUR gerak, bukan pada satu properti. Sumber kebenaran
+  // tetap `position`/`rotation`; `writeSceneView` tidak pernah membaca `keys`.
+  const trackView = (objectId, property) => {
+    const track = trackOf(shot, objectId, property) ?? emptyTrack(objectId, property);
+    return {property, interpolation: track.interpolation ?? 'linear', keys: clone(track.keys)};
+  };
+  const setType = o => o.type ?? 'room';
   return {
     title: doc.title,
     duration: shot.duration,
-    actors: scene.actors.map(a => ({
-      id: a.id, name: a.name, color: a.color, height: a.height,
-      locked: a.locked, visible: a.visible, keys: keysOf(a.id),
-    })),
-    rooms: scene.setObjects.map(r => ({
+    actors: scene.actors.map(a => {
+      const position = trackView(a.id, 'position'), rotation = trackView(a.id, 'rotation');
+      return {
+        id: a.id, name: a.name, color: a.color, height: a.height,
+        locked: a.locked, visible: a.visible,
+        position, rotation, keys: combineTracks(position, rotation),
+      };
+    }),
+    rooms: scene.setObjects.filter(o => setType(o) === 'room').map(r => ({
       id: r.id, name: r.name, x: r.x, z: r.z, w: r.w, d: r.d, h: r.h, color: r.color,
       doors: clone(r.doors ?? []), locked: r.locked, visible: r.visible,
+    })),
+    // F4-07 / F4-08 — prop dan dinding modular berbagi array `setObjects` di dokumen,
+    // tetapi dipisahkan di scene view supaya `rooms` tetap berarti "ruangan" persis
+    // seperti pada v1/v2 (golden pose Fase 0 mengukur `rooms`).
+    props: scene.setObjects.filter(o => setType(o) === 'prop').map(p => ({
+      id: p.id, type: 'prop', shape: p.shape, name: p.name, color: p.color,
+      x: p.x, y: p.y, z: p.z, r: p.r, w: p.w, d: p.d, h: p.h,
+      locked: p.locked, visible: p.visible,
+    })),
+    walls: scene.setObjects.filter(o => setType(o) === 'wall').map(w => ({
+      id: w.id, type: 'wall', name: w.name, color: w.color,
+      x: w.x, z: w.z, r: w.r, length: w.length, height: w.height, thickness: w.thickness,
+      locked: w.locked, visible: w.visible,
     })),
     camera: shot.camera ? {
       id: shot.camera.id, name: shot.camera.name, focal: shot.camera.focal,
       target: shot.camera.targetId, locked: shot.camera.locked, visible: shot.camera.visible,
+      // v3: interpolasi track kamera ikut dibawa ke editor (TL-02).
+      interpolation: trackOf(shot, shot.camera.id, 'pose')?.interpolation ?? 'linear',
       keys: keysOf(shot.camera.id),
     } : null,
   };
@@ -79,26 +118,45 @@ export function writeSceneView(doc, sceneId, shotId, view) {
   doc.title = view.title;
   shot.duration = view.duration;
   scene.actors = view.actors.map(a => {
-    tracks.push({objectId: a.id, property: 'pose', interpolation: 'linear', keys: clone(a.keys)});
+    // Sumber kebenaran gerak aktor adalah dua track; `a.keys` gabungan sengaja TIDAK
+    // dibaca di sini supaya cache turunan tidak pernah dapat menimpa data asli.
+    for (const property of ['position', 'rotation']) {
+      const track = a[property] ?? emptyTrack(a.id, property);
+      tracks.push({objectId: a.id, property, interpolation: track.interpolation ?? 'linear', keys: clone(track.keys)});
+    }
     return {
       id: a.id, type: 'actor', name: a.name, color: a.color, height: a.height,
       locked: !!a.locked, visible: a.visible !== false,
       assetRef: previousActors.get(a.id)?.assetRef ?? null,
     };
   });
-  scene.setObjects = view.rooms.map(r => ({
-    id: r.id, type: 'room', name: r.name, color: r.color,
-    x: r.x, z: r.z, w: r.w, d: r.d, h: r.h, doors: clone(r.doors ?? []),
-    locked: !!r.locked, visible: r.visible !== false,
-    assetRef: previousRooms.get(r.id)?.assetRef ?? null,
-  }));
+  scene.setObjects = [
+    ...view.rooms.map(r => ({
+      id: r.id, type: 'room', name: r.name, color: r.color,
+      x: r.x, z: r.z, w: r.w, d: r.d, h: r.h, doors: clone(r.doors ?? []),
+      locked: !!r.locked, visible: r.visible !== false,
+      assetRef: previousRooms.get(r.id)?.assetRef ?? null,
+    })),
+    ...(view.props ?? []).map(p => ({
+      id: p.id, type: 'prop', shape: p.shape, name: p.name, color: p.color,
+      x: p.x, y: p.y, z: p.z, r: p.r, w: p.w, d: p.d, h: p.h,
+      locked: !!p.locked, visible: p.visible !== false,
+      assetRef: previousRooms.get(p.id)?.assetRef ?? null,
+    })),
+    ...(view.walls ?? []).map(w => ({
+      id: w.id, type: 'wall', name: w.name, color: w.color,
+      x: w.x, z: w.z, r: w.r, length: w.length, height: w.height, thickness: w.thickness,
+      locked: !!w.locked, visible: w.visible !== false,
+      assetRef: previousRooms.get(w.id)?.assetRef ?? null,
+    })),
+  ];
   if (view.camera) {
     shot.camera = {
       id: view.camera.id, type: 'camera', name: view.camera.name, focal: view.camera.focal,
       targetId: view.camera.target ?? '', locked: !!view.camera.locked, visible: view.camera.visible !== false,
     };
     shot.cameraId = shot.camera.id;
-    tracks.push({objectId: view.camera.id, property: 'pose', interpolation: 'linear', keys: clone(view.camera.keys)});
+    tracks.push({objectId: view.camera.id, property: 'pose', interpolation: view.camera.interpolation ?? 'linear', keys: clone(view.camera.keys)});
   } else {
     shot.camera = null;
     shot.cameraId = null;
@@ -115,8 +173,7 @@ export function writeSceneView(doc, sceneId, shotId, view) {
   return doc;
 }
 
-const ACTOR_SEED = {x: 0, z: 0, r: 0};
-const CAMERA_SEED = {x: 0, y: 2, z: 6, tx: 0, ty: 1.2, tz: 0};
+const CAMERA_SEED = TRACK_SEED.pose;
 
 /**
  * Menyelaraskan track SELURUH shot dalam satu scene dengan daftar aktor scene (F4-02).
@@ -134,18 +191,22 @@ const CAMERA_SEED = {x: 0, y: 2, z: 6, tx: 0, ty: 1.2, tz: 0};
  */
 export function syncShotTracks(scene, {seedFrom = null} = {}) {
   for (const shot of scene.shots) {
-    const byId = new Map(shot.tracks.map(track => [track.objectId, track]));
+    const byId = new Map(shot.tracks.map(track => [`${track.objectId}#${track.property}`, track]));
     const tracks = [];
     for (const actor of scene.actors) {
-      const existing = byId.get(actor.id);
-      if (existing) {tracks.push(existing); continue;}
-      const seed = seedFrom?.tracks.find(t => t.objectId === actor.id)?.keys?.[0];
-      const key = seed ? {...clone(seed), t: 0} : {...ACTOR_SEED, t: 0};
-      tracks.push({objectId: actor.id, property: 'pose', interpolation: 'linear', keys: [key]});
+      // v3: dua track per aktor. Urutan position lalu rotation dijaga sama dengan
+      // `writeSceneView` supaya menyimpan dua kali menghasilkan dokumen identik.
+      for (const property of ['position', 'rotation']) {
+        const existing = byId.get(`${actor.id}#${property}`);
+        if (existing) {tracks.push(existing); continue;}
+        const seed = seedFrom?.tracks.find(t => t.objectId === actor.id && t.property === property)?.keys?.[0];
+        const key = seed ? {...clone(seed), t: 0} : {...TRACK_SEED[property], t: 0};
+        tracks.push({objectId: actor.id, property, interpolation: 'linear', keys: [key]});
+      }
     }
     if (shot.camera) {
       if (shot.camera.targetId && !scene.actors.some(a => a.id === shot.camera.targetId)) shot.camera.targetId = '';
-      const existing = byId.get(shot.camera.id);
+      const existing = byId.get(`${shot.camera.id}#pose`);
       tracks.push(existing ?? {
         objectId: shot.camera.id, property: 'pose', interpolation: 'linear',
         keys: [{...CAMERA_SEED, t: 0}],

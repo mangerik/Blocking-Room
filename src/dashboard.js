@@ -308,8 +308,11 @@ export async function mountDashboard({
 
   async function duplicate(id) {
     try {
-      const doc = await repository.getDocument(id);
-      if (!doc) {notify('Dokumen proyek tidak ditemukan.'); return;}
+      const raw = await repository.getDocument(id);
+      if (!raw) {notify('Dokumen proyek tidak ditemukan.'); return;}
+      // Dokumen tersimpan boleh saja berasal dari schema lama: duplikasi selalu
+      // melewati migrator supaya salinannya lahir sebagai dokumen versi sekarang.
+      const doc = openProjectData(raw).document;
       const copy = cloneProjectDocument(doc, {title: uniqueTitle(`${doc.title} (salinan)`.slice(0, 100), projects.map(p => p.title))});
       await repository.saveDocument(copy, {revision: true, revisionToken: Date.now()});
       metrics.record('project_created', {storage: 'local', template: 'duplicate', schemaVersion: copy.schemaVersion});
@@ -357,8 +360,9 @@ export async function mountDashboard({
 
   async function exportPackage(id) {
     try {
-      const doc = await repository.getDocument(id);
-      if (!doc) {notify('Dokumen proyek tidak ditemukan.'); return;}
+      const raw = await repository.getDocument(id);
+      if (!raw) {notify('Dokumen proyek tidak ditemukan.'); return;}
+      const doc = openProjectData(raw).document;
       const list = await repository.listAssets(id).catch(() => []);
       const pkg = await buildPackage(doc, list);
       download(new Blob([JSON.stringify(pkg, null, 2)], {type: 'application/json'}), packageFileName(doc.title));

@@ -9,6 +9,7 @@
 // Setiap BrowserContext Playwright punya partisi storage sendiri, jadi dashboard selalu
 // mulai dari keadaan kosong.
 import {chromium} from '@playwright/test';
+import {SCHEMA_VERSION} from '../src/schema.js';
 import assert from 'node:assert/strict';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 
@@ -191,7 +192,7 @@ assert.ok(packageFile.suggestedFilename().endsWith('.blockingroom.json'), 'paket
 await packageFile.saveAs('artifacts/paket-uji.blockingroom.json');
 const packageRaw = JSON.parse(await readFile('artifacts/paket-uji.blockingroom.json', 'utf8'));
 assert.equal(packageRaw.manifest.format, 'blockingroom.package');
-assert.equal(packageRaw.manifest.schemaVersion, 2);
+assert.equal(packageRaw.manifest.schemaVersion, SCHEMA_VERSION);
 assert.ok(packageRaw.manifest.createdAt && packageRaw.manifest.app.version);
 for (const part of ['project', 'scenes', 'assets']) assert.match(packageRaw.manifest.checksums[part], /^[0-9a-f]{64}$/, `checksum ${part} ada`);
 assert.equal(packageRaw.manifest.counts.scenes, packageRaw.scenes.length);
@@ -222,7 +223,7 @@ await page.locator('#dash-file').setInputFiles('tests/fixtures/v1/demo-scene.jso
 await page.waitForFunction(n => document.querySelectorAll('.dash-card').length === n + 1, before1, {timeout: 10000});
 const v1Meta = (await metas()).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 const v1Doc = await doc(v1Meta.id);
-assert.equal(v1Doc.schemaVersion, 2, 'JSON v1 dimigrasikan saat impor');
+assert.equal(v1Doc.schemaVersion, SCHEMA_VERSION, 'JSON v1 dimigrasikan saat impor');
 assert.equal(v1Doc.scenes.length, 1);
 assert.notEqual(v1Doc.id, idA);
 assert.equal((await doc(idA)).id, idA, 'impor v1 tidak menimpa proyek lain');

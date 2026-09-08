@@ -7,6 +7,7 @@
 //
 // Modul ini sengaja tidak mengimpor Three.js sama sekali.
 import {bootstrapDashboard} from './bootstrap.js';
+import {openProjectData} from './migrate.js';
 import {capabilities, capabilityWarnings} from './capabilities.js';
 import {readFlag} from './flags.js';
 import {DASHBOARD_ROUTE} from './routing.js';
@@ -66,10 +67,11 @@ export async function mountNoWebGL({projectId = null, mount = document.querySele
   }
   try {
     const wanted = projectId ?? activeProjectId();
-    document_ = wanted ? await repository.getDocument(wanted) : null;
+    const open_ = raw => (raw ? openProjectData(raw).document : null);
+    document_ = open_(wanted ? await repository.getDocument(wanted) : null);
     if (!document_) {
       const [newest] = await repository.listProjects();
-      document_ = newest ? await repository.getDocument(newest.id) : null;
+      document_ = open_(newest ? await repository.getDocument(newest.id) : null);
     }
   } catch (readError) {
     status(`Proyek tidak dapat dibaca: ${readError.message}`);

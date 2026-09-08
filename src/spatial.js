@@ -29,8 +29,18 @@ export function wallPanels(room, wall) {
     {center:door.offset,y:(room.h+door.height)/2,width:door.width,height:room.h-door.height}
   ].filter(p=>p.width>0&&p.height>0);
 }
+/**
+ * Ujung-ujung sebuah segmen dinding modular (F4-08) di koordinat dunia.
+ * Konvensi rotasi sama dengan aktor: 0° → sepanjang +Z, 90° → sepanjang +X.
+ */
+export function wallEnds(wall) {
+  const radians=(wall.r??0)*Math.PI/180,half=(wall.length??0)/2;
+  const dx=Math.sin(radians)*half,dz=Math.cos(radians)*half;
+  return {ax:wall.x-dx,az:wall.z-dz,bx:wall.x+dx,bz:wall.z+dz};
+}
 // Report straight keyframe segments that cross a solid portion of an existing wall.
-export function wallCrossings(actor,rooms) {
+// `walls` adalah segmen dinding modular v3 (F4-08); kosong berarti perilaku R1 apa adanya.
+export function wallCrossings(actor,rooms,walls=[]) {
   const hits=[];
   for(let i=1;i<actor.keys.length;i++){
     const a=actor.keys[i-1],b=actor.keys[i];
@@ -43,6 +53,19 @@ export function wallCrossings(actor,rooms) {
       const door=room.doors?.find(d=>d.wall===wall);
       if(door&&Math.abs(at-door.offset)<=door.width/2-.25&&actor.height<=door.height)continue;
       hits.push({roomId:room.id,wall,t:a.t+(b.t-a.t)*f});
+    }
+  }
+  // Dinding modular: perpotongan dua ruas garis. Segmen tidak memiliki bukaan, jadi
+  // seluruh panjangnya padat. Hasilnya tetap PERINGATAN, bukan collision (PRD SC-01).
+  for(let i=1;i<actor.keys.length;i++){
+    const a=actor.keys[i-1],b=actor.keys[i];
+    for(const wall of (walls??[]).filter(w=>w.visible!==false)){
+      const {ax,az,bx,bz}=wallEnds(wall);
+      const rx=b.x-a.x,rz=b.z-a.z,sx=bx-ax,sz=bz-az,denom=rx*sz-rz*sx;
+      if(Math.abs(denom)<1e-9)continue;
+      const f=((ax-a.x)*sz-(az-a.z)*sx)/denom,g=((ax-a.x)*rz-(az-a.z)*rx)/denom;
+      if(f<=0||f>1||g<0||g>1)continue;
+      hits.push({roomId:wall.id,wallId:wall.id,wall:'segment',t:a.t+(b.t-a.t)*f});
     }
   }
   return hits;

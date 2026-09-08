@@ -89,7 +89,14 @@ The visual language deliberately stays simple. Geometric actors and lightweight 
 - Edit on a frame ruler with frame snapping (toggleable), zoom and pan, an exact frame input, `MM:SS:FF` timecode, single-frame stepping, and clamping at the start and end of the shot. Changing fps never moves a keyframe: time is stored in seconds and frames are a display unit.
 - Drag, multi-select, copy, paste, and delete keyframes. Every bulk operation is a single undo step, locked or hidden items are skipped with a named list, and any keyframe overwritten by a time collision is reported.
 - Choose wide / normal / tele lens presets, per-shot 16:9, 9:16, 2.39:1, 4:3, or 1:1 framing with a safe-area overlay, and keyframe focal length. Preview and export share the same crop.
+- Key position and orientation on separate tracks. Each actor gets two timeline lanes with distinct keyframe markers, and every track carries its own interpolation: linear, hold, or ease. When adding a keyframe you choose which track it lands on (position, orientation, or both), so nudging an actor never rewrites its facing.
 - Turn on an optional 0.5 m snap grid when arranging the set; it is off by default and does not apply while recording.
+
+### Props and modular walls
+
+- Boxes, tables, chairs, and decorations are first-class objects with their own IDs, listed under the **Props** tab. Transform, lock, hide, duplicate, delete, and undo all go through the same command path as actors and rooms, and picking requires an explicit selection first so dragging an actor cannot grab the set dressing.
+- Modular wall segments (`x`, `z`, rotation, length, height, thickness) are independent objects too. Room doors are untouched and remain the only openings; a path crossing a wall segment is reported as a warning, never as a physical collision.
+- Projects saved before schema version 3 are migrated on open: the sample set dressing that used to be drawn from the room index becomes real props at exactly the same world position.
 - Read the current mode at a glance: an Edit / Play / Record cue with the active frame number.
 
 ### Editing safety
@@ -236,7 +243,7 @@ Shortcuts do not run while typing in an input field. Locked or hidden items do n
 ## Project data and persistence
 
 Projects are stored in the IndexedDB database `blocking-room` (`src/repository.js`), in five
-object stores: `projects` (dashboard metadata), `documents` (full schema v2 documents),
+object stores: `projects` (dashboard metadata), `documents` (full schema v3 documents),
 `revisions` (recovery snapshots), `assets` (scene thumbnails), and `session` (per-project UI
 state such as the active scene, playhead, selection, and observer pose).
 
@@ -314,7 +321,7 @@ Hash router (app.js)
     └── Timeline and transport
             │
             ▼
-    Scene view ──► document (schema v2) ──► validation ──► history snapshot
+    Scene view ──► document (schema v3) ──► validation ──► history snapshot
             │                                   │
             │                                   └──► autosave ──► IndexedDB
             │                                          (documents + projects + revisions,
@@ -353,10 +360,10 @@ Key design rules:
 │   ├── autosave.js            # Coalesced atomic autosave with revision tokens
 │   ├── session-state.js       # Per-project UI state (scene, playhead, selection)
 │   ├── tab-lock.js            # One writer tab per project
-│   ├── document.js            # Schema v2 document store, scene view, scene operations
+│   ├── document.js            # Schema v3 document store, scene view, scene operations
 │   ├── commands.js            # Command/history boundary, read-only enforcement
-│   ├── schema.js              # Schema v2 validator and limits
-│   ├── migrate.js             # Version 1 → version 2 migration
+│   ├── schema.js              # Schema v3 validator and limits
+│   ├── migrate.js             # Version 1 → 2 → 3 migration chain (copy-first)
 │   ├── package.js             # `.blockingroom.json` package build/read with checksums
 │   ├── scene-renderer.js      # Three.js boundary, context-loss handling, dispose
 │   ├── timeline-engine.js     # Sampling, time formatting, keyframe helpers, aspect ratios
@@ -388,7 +395,7 @@ Key design rules:
 │   └── perf-browser.mjs       # Performance harness (input latency, playback, open, memory)
 ├── docs/
 │   ├── PRD.md                 # Product requirements and release scope
-│   ├── DATA-MODEL.md          # Schema v2 contract, storage, trash, package format
+│   ├── DATA-MODEL.md          # Schema v3 contract, storage, trash, package format
 │   ├── AUDIT.md               # Current behavior, evidence, and risks
 │   ├── PERF-BASELINE.md       # Reference device, load fixtures, measured performance
 │   ├── A11Y-AUDIT.md          # Accessibility findings: fixed and still open
@@ -449,14 +456,15 @@ Tested locally during prototype development with Node.js 22 and stable Chrome on
 ## Known limitations
 
 - Everything is local: multiple projects and scenes exist through the dashboard, but there is no cloud sync, account, or collaboration.
-- A scene supports zero or one active camera and up to 50 actors, 30 rooms, and 120 seconds.
+- A scene supports zero or one active camera and up to 50 actors, 80 set objects (rooms, props, and wall segments combined), and 120 seconds.
 - Actors are geometric mannequins. The procedural walk is a staging cue, not a rigged animation with foot IK.
 - Rooms are rectangular and expose only left/back walls. Doors are always open and limited to those walls.
 - Wall checks warn about straight keyframe segments but do not enforce physical collision or automatically reroute actors.
-- Set decorations are still demonstration geometry rather than first-class editable props, and wall segments are not yet independent objects (schema version 3 work; see `docs/DATA-MODEL.md` section 8).
-- Timeline tracks are still combined pose tracks: position and orientation cannot be keyed separately, and interpolation is linear only — no hold or ease (also schema version 3 work).
+- Props and wall segments are static: they cannot be keyframed. Animating a prop would require motion tracks for set objects, which is a separate schema change.
+- Interpolation is chosen per track, not per keyframe; there are no per-segment bezier curves yet.
+- Props and wall segments rotate through the inspector `r` field; the rotate tool still applies to actors only.
 - Keyframe selection has no marquee; use click and Shift/Ctrl-click.
-- Rotation uses the shortest angular interpolation; intentional turns greater than 360 degrees are not represented.
+- Rotation uses the shortest angular interpolation; intentional turns greater than 360 degrees are still not represented, even though orientation now has its own track (decision D-06).
 - Shortening duration trims later keyframes. Locked animated items must be unlocked before such trimming.
 - Video export is real-time and browser-dependent, with no audio or universal MP4 guarantee.
 - The UI is optimized for desktop. The responsive layout avoids horizontal overflow, but mobile touch ergonomics need further work.
@@ -471,11 +479,11 @@ The detailed roadmap lives in [plan.md](plan.md), with product rationale and acc
 | R0 | Safe editor: history, lock, visibility, rotation, final-view editing | Implemented baseline |
 | R0.1 | Procedural walking, full item deletion, door openings, wall warnings | Implemented baseline |
 | R1 | Local project dashboard, multiple scenes, IndexedDB, autosave recovery, trash, import/export packages | Implemented; release gate passed |
-| R2 | Shot list, isolated cameras/tracks, advanced timeline, props, cinematic formats, deterministic export | Shot list, isolated cameras/tracks, advanced timeline, and cinematic formats implemented; per-property tracks, props, and deterministic export outstanding |
+| R2 | Shot list, isolated cameras/tracks, advanced timeline, props, cinematic formats, deterministic export | Shot list, isolated cameras/tracks, advanced timeline, per-property tracks, props, modular walls, and cinematic formats implemented; deterministic export outstanding |
 | R3 | Optional cloud sync, revision history, roles, immutable review links, timestamp comments | Conditional on validation |
 | Exploration | GLB/rigs, audio cues, floor-plan underlays, continuity tools, AI-assisted blocking | Research backlog |
 
-The immediate next work is deterministic export (phase 5), followed by the single schema version 3 migration that carries separate position/rotation tracks, hold/ease interpolation, and prop entities together. See `plan.md` and `docs/DATA-MODEL.md` section 8.
+Schema version 3 has shipped: one migration carries separate position/rotation tracks, hold/ease interpolation, prop entities, and modular walls together. The immediate next work is deterministic export (phase 5), then release gate R2. See `plan.md` and `docs/DATA-MODEL.md` section 8.
 
 ## Contributing
 

@@ -161,7 +161,11 @@ test('menambah aktor lewat scene view membuat track di semua shot', () => {
   const scene = doc.scenes[0];
   addShot(scene, {id: ids});
   const store = new DocumentStore(doc);
-  store.view.actors.push({id: 'a9', name: 'Baru', color: '#123456', height: 1.7, locked: false, visible: true, keys: [{t: 0, x: 1, z: 2, r: 0}]});
+  // v3 (F4-05): aktor scene view membawa dua track independen.
+  store.view.actors.push({id: 'a9', name: 'Baru', color: '#123456', height: 1.7, locked: false, visible: true,
+    position: {property: 'position', interpolation: 'linear', keys: [{t: 0, x: 1, z: 2}]},
+    rotation: {property: 'rotation', interpolation: 'linear', keys: [{t: 0, r: 0}]},
+    keys: [{t: 0, x: 1, z: 2, r: 0}]});
   const snapshot = store.snapshot();
   validateDocument(snapshot);
   for (const shot of snapshot.scenes[0].shots) {
@@ -171,7 +175,8 @@ test('menambah aktor lewat scene view membuat track di semua shot', () => {
   }
   // Shot non-aktif memakai pose awal shot aktif, bukan titik nol.
   const other = snapshot.scenes[0].shots.find(s => s.id !== store.shotId);
-  assert.deepEqual(other.tracks.find(t => t.objectId === 'a9').keys, [{t: 0, x: 1, z: 2, r: 0}]);
+  assert.deepEqual(other.tracks.find(t => t.objectId === 'a9' && t.property === 'position').keys, [{t: 0, x: 1, z: 2}]);
+  assert.deepEqual(other.tracks.find(t => t.objectId === 'a9' && t.property === 'rotation').keys, [{t: 0, r: 0}]);
 });
 
 test('menghapus aktor membersihkan track di semua shot dan melepas target kamera', () => {
@@ -222,14 +227,17 @@ test('writeSceneView hanya menyentuh shot aktif', () => {
   const scene = doc.scenes[0];
   const b = addShot(scene, {id: ids});
   const beforeB = clone(b);
+  const trackOf = (objectId, property) => scene.shots[0].tracks.find(t => t.objectId === objectId && t.property === property);
   const view = {
     title: doc.title, duration: scene.shots[0].duration,
-    actors: scene.actors.map(a => ({...a, keys: scene.shots[0].tracks.find(t => t.objectId === a.id).keys})),
-    rooms: scene.setObjects.map(r => ({...r})),
+    actors: scene.actors.map(a => ({...a, position: clone(trackOf(a.id, 'position')), rotation: clone(trackOf(a.id, 'rotation'))})),
+    rooms: scene.setObjects.filter(o => o.type === 'room').map(r => ({...r})),
+    props: scene.setObjects.filter(o => o.type === 'prop').map(p => ({...p})),
+    walls: [],
     camera: {...scene.shots[0].camera, target: scene.shots[0].camera.targetId,
-      keys: scene.shots[0].tracks.find(t => t.objectId === scene.shots[0].camera.id).keys},
+      keys: trackOf(scene.shots[0].camera.id, 'pose').keys},
   };
-  view.actors[0].keys = [...view.actors[0].keys, {t: 8, x: 0, z: 0, r: 0}];
+  view.actors[0].position.keys = [...view.actors[0].position.keys, {t: 8, x: 0, z: 0}];
   writeSceneView(doc, scene.id, scene.shots[0].id, view);
   validateDocument(doc);
   assert.deepEqual(scene.shots.find(s => s.id === b.id), beforeB);

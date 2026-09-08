@@ -14,7 +14,8 @@
 //
 // Checksum SHA-256 dihitung dengan `crypto.subtle` atas JSON kanonik tiap bagian.
 // Paket tanpa aset tetap valid: checksum dihitung atas array kosong.
-import {SCHEMA_VERSION, SchemaTooNewError, validateDocument} from './schema.js';
+import {SCHEMA_VERSION, SchemaTooNewError} from './schema.js';
+import {openProjectData} from './migrate.js';
 
 export const PACKAGE_FORMAT = 'blockingroom.package';
 export const PACKAGE_VERSION = 1;
@@ -100,7 +101,9 @@ export async function readPackage(input, {maxBytes = MAX_PACKAGE_BYTES, rawSize}
   if (Number.isInteger(counts.scenes) && counts.scenes !== input.scenes.length) throw new Error('Jumlah scene pada manifest tidak cocok dengan isi paket.');
   if (Number.isInteger(counts.assets) && counts.assets !== assets.length) throw new Error('Jumlah aset pada manifest tidak cocok dengan isi paket.');
 
-  const document = validateDocument(clone({...input.project, scenes: input.scenes}));
+  // Paket lama membawa dokumen v1/v2; ia harus melewati migrator, bukan validator
+  // langsung, kalau tidak paket yang dibuat sebelum kenaikan schema akan ditolak.
+  const {document} = openProjectData(clone({...input.project, scenes: input.scenes}));
   return {document, assets: clone(assets), manifest: clone(manifest)};
 }
 

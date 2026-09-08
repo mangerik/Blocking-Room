@@ -77,15 +77,22 @@ export async function bootstrap({
       doc = migratedDocument;
     } else {
       const wanted = activeProjectId(storage) ?? marker;
-      if (wanted) doc = await result.repository.getDocument(wanted);
+      if (wanted) doc = await readStored(result.repository, wanted);
       if (!doc) {
         const [newest] = await result.repository.listProjects();
-        if (newest) doc = await result.repository.getDocument(newest.id);
+        if (newest) doc = await readStored(result.repository, newest.id);
       }
       if (!doc) {
         doc = fallbackDocument();
         await result.repository.saveDocument(doc, {revision: true, revisionToken: 1});
         result.createdNew = true;
+      } else if (doc.__upgraded) {
+        // Dokumen tersimpan berasal dari schema lama. Hasil upgrade disimpan ulang
+        // SEKARANG supaya migrasi tidak dijalankan lagi setiap kali proyek dibuka;
+        // salinan sumber tetap ada sebagai revisi terakhir sebelum penulisan ini.
+        delete doc.__upgraded;
+        result.migrated = true;
+        await result.repository.saveDocument(doc, {revision: true, revisionToken: Date.now()}).catch(() => {});
       }
     }
   } catch (error) {
@@ -102,6 +109,23 @@ export async function bootstrap({
   result.document = doc;
   result.sessionState = await result.repository.getSession(doc.id).catch(() => null);
   return finish(result, repository, storage, lockFactory, onLockChange, {});
+}
+
+/**
+ * Membaca dokumen tersimpan LEWAT migrator.
+ *
+ * Ini bagian yang paling mudah terlewat saat `SCHEMA_VERSION` naik: dokumen v2 milik
+ * pengguna sudah ada di IndexedDB, dan menyerahkannya langsung ke `DocumentStore`
+ * berarti validator v3 menolaknya begitu editor dibuka. `openProjectData` bersifat
+ * copy-first: baris IndexedDB tidak pernah dimutasi di tempat.
+ * Menandai hasil upgrade dengan `__upgraded` supaya pemanggil menyimpannya ulang.
+ */
+async function readStored(repository, id) {
+  const raw = await repository.getDocument(id);
+  if (!raw) return null;
+  const opened = openProjectData(raw);
+  if (opened.migrated) opened.document.__upgraded = true;
+  return opened.document;
 }
 
 /**

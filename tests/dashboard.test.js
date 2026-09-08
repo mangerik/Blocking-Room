@@ -9,7 +9,7 @@ import {
   DocumentStore, addScene, cloneProjectDocument, duplicateScene, emptyDocument,
   moveScene, nextSceneName, removeScene, renameScene,
 } from '../src/document.js';
-import {validateDocument} from '../src/schema.js';
+import {SCHEMA_VERSION, validateDocument} from '../src/schema.js';
 import {buildPackage, isPackage, readPackage, packageFileName} from '../src/package.js';
 import {uniqueTitle} from '../src/dashboard-support.js';
 import {initialProject} from '../src/model.js';
@@ -220,7 +220,7 @@ test('paket berisi manifest, checksum dan bagian terpisah; roundtrip setara', as
   const pack = await buildPackage(doc, []);
   assert.ok(isPackage(pack));
   assert.equal(pack.manifest.format, 'blockingroom.package');
-  assert.equal(pack.manifest.schemaVersion, 2);
+  assert.equal(pack.manifest.schemaVersion, SCHEMA_VERSION);
   assert.equal(pack.manifest.counts.scenes, 2);
   assert.equal(pack.manifest.counts.assets, 0, 'paket tanpa aset tetap valid');
   for (const part of ['project', 'scenes', 'assets']) assert.match(pack.manifest.checksums[part], /^[0-9a-f]{64}$/);

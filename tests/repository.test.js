@@ -12,7 +12,9 @@ import {bootstrap} from '../src/bootstrap.js';
 import {emptyDocument, cloneProjectDocument} from '../src/document.js';
 import {ACTIVE_PROJECT_KEY, BACKUP_KEY, MIGRATED_KEY, PENDING_KEY, STORAGE_KEY, writePendingDocument} from '../src/storage.js';
 import {initialProject} from '../src/model.js';
-import {openProjectData} from '../src/migrate.js';
+import {V2_SCHEMA_VERSION, migrateV1ToV2, openProjectData} from '../src/migrate.js';
+import {SCHEMA_VERSION} from '../src/schema.js';
+import {DocumentStore} from '../src/document.js';
 
 const newRepo = (options = {}) => new ProjectRepository({
   factory: new FakeIndexedDB(), keyRange: FakeKeyRange, ...options,
@@ -22,9 +24,14 @@ const docWith = (title, keys = [{t: 0, x: 0, z: 0, r: 0}]) => {
   const doc = emptyDocument({title});
   const scene = doc.scenes[0], shot = scene.shots[0];
   scene.actors.push({id: 'a1', type: 'actor', name: 'Alex', color: '#b7745a', height: 1.75, locked: false, visible: true, assetRef: null});
-  shot.tracks.push({objectId: 'a1', property: 'pose', interpolation: 'linear', keys});
+  // v3: dua track independen per aktor (F4-05).
+  shot.tracks.push({objectId: 'a1', property: 'position', interpolation: 'linear', keys: keys.map(k => ({t: k.t, x: k.x, z: k.z}))});
+  shot.tracks.push({objectId: 'a1', property: 'rotation', interpolation: 'linear', keys: keys.map(k => ({t: k.t, r: k.r}))});
   return doc;
 };
+
+/** Dokumen v2 apa adanya — bentuk yang sudah tersimpan di IndexedDB pengguna. */
+const storedV2Document = () => migrateV1ToV2(initialProject());
 
 test('repository menyimpan dokumen dan metadata dalam satu transaksi', async () => {
   const repo = await newRepo().open();
@@ -237,6 +244,40 @@ test('penanda migrasi tidak ditulis bila transaksi gagal', async () => {
     lockFactory: projectId => new ProjectLock({projectId, storage, locks: null})});
   assert.equal(storage.getItem(MIGRATED_KEY), null, 'penanda hanya ditulis setelah commit sukses');
   assert.equal(result.error.message, 'kuota penuh');
+});
+
+// F4b: dokumen v2 yang SUDAH tersimpan di IndexedDB harus tetap dapat dibuka setelah
+// `SCHEMA_VERSION` naik. Ini titik yang paling mudah terlewat — `bootstrap()` dahulu
+// menyerahkan hasil `getDocument()` langsung ke `DocumentStore`, sehingga validator v3
+// akan menolaknya dan pengguna kehilangan akses ke karyanya.
+test('dokumen v2 tersimpan di IndexedDB dibuka lewat bootstrap dan disimpan ulang sebagai v3', async () => {
+  const factory = new FakeIndexedDB();
+  const storage = new FakeStorage();
+  const repo = await new ProjectRepository({factory, keyRange: FakeKeyRange}).open();
+  const legacy = storedV2Document();
+  assert.equal(legacy.schemaVersion, V2_SCHEMA_VERSION);
+  await repo.saveDocument(legacy, {revisionToken: 1});
+  storage.setItem(ACTIVE_PROJECT_KEY, legacy.id);
+  storage.setItem(MIGRATED_KEY, legacy.id); // migrasi localStorage sudah pernah berjalan
+
+  const boot = await bootstrap({repository: new ProjectRepository({factory, keyRange: FakeKeyRange}), storage,
+    fallbackDocument: () => openProjectData(initialProject()).document,
+    lockFactory: id => new ProjectLock({projectId: id, storage, locks: null})});
+
+  assert.equal(boot.error, null, 'dokumen v2 tersimpan tidak boleh ditolak');
+  assert.equal(boot.unavailable, false);
+  assert.equal(boot.createdNew, false, 'proyek lama dipakai, bukan diganti proyek demo baru');
+  assert.equal(boot.document.id, legacy.id, 'ID proyek dipertahankan');
+  assert.equal(boot.document.schemaVersion, SCHEMA_VERSION);
+  assert.equal(boot.migrated, true);
+  // Dokumen hasil upgrade harus tersimpan ulang supaya migrasi tidak berjalan berulang.
+  assert.equal((await repo.getDocument(legacy.id)).schemaVersion, SCHEMA_VERSION);
+  assert.equal((await repo.listProjects()).length, 1, 'upgrade tidak membuat proyek duplikat');
+  // Dokumen hasil upgrade langsung dapat dipakai editor.
+  const store = new DocumentStore(boot.document);
+  assert.equal(store.view.actors.length, initialProject().actors.length);
+  assert.deepEqual(store.view.actors[0].keys, initialProject().actors[0].keys);
+  boot.lock.release();
 });
 
 test('titipan sinkron dari tab yang ditutup dipulihkan saat bootstrap', async () => {
