@@ -96,6 +96,37 @@ export class SceneRenderer {
     this.helper.material.opacity = .55;
     this.scene.add(this.helper);
 
+    /** Frekuensi maksimum render preview kamera kanan (F6-02). */
+    this.povFps = 30;
+    this.lastPovAt = -Infinity;
+    this.povBackground = new THREE.Color('#dbdfd1');
+
+    // F6-05: kehilangan konteks WebGL (GPU reset, tab lama, driver crash).
+    // `preventDefault()` pada `webglcontextlost` adalah syarat agar browser mau
+    // mengirim `webglcontextrestored`; tanpa itu canvas mati permanen. Selama
+    // konteks hilang renderer berhenti menggambar sehingga tidak membanjiri
+    // console dengan error, dan UI menampilkan pesan + tombol coba lagi.
+    this.contextLost = false;
+    this.onContextChange = () => {};
+    // Referensi ekstensi diambil SEKARANG: setelah konteks hilang,
+    // `getExtension()` mengembalikan null sehingga pemulihan tidak akan pernah
+    // dapat dipanggil bila baru dicari saat dibutuhkan.
+    this.loseContextExtension = (() => {
+      try {return this.renderer.getContext().getExtension('WEBGL_lose_context');} catch {return null;}
+    })();
+    for (const [renderer, source] of [[this.renderer, 'viewport'], [this.povRenderer, 'pov']]) {
+      renderer.domElement.addEventListener('webglcontextlost', event => {
+        event.preventDefault();
+        this.contextLost = true;
+        this.onContextChange({lost: true, source});
+      });
+      renderer.domElement.addEventListener('webglcontextrestored', () => {
+        this.contextLost = false;
+        this.lastPovAt = -Infinity;
+        this.onContextChange({lost: false, source});
+      });
+    }
+
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -104,14 +135,49 @@ export class SceneRenderer {
   get canvas() {return this.renderer.domElement;}
   get povCanvas() {return this.povRenderer.domElement;}
 
+  /**
+   * Sumber daya bersama untuk jalur gerakan (F6-02).
+   * `buildPaths` dijalankan setiap pointermove saat drag; membuat ulang ratusan
+   * SphereGeometry dan material per pemanggilan adalah biaya terukur. Geometri dan
+   * material titik jalur dibuat sekali lalu dipakai ulang, dan ditandai
+   * `userData.shared` supaya `clearGroup` tidak men-dispose-nya.
+   */
+  dotGeometry() {
+    if (!this.sharedDotGeometry) {
+      this.sharedDotGeometry = new THREE.SphereGeometry(.075, 8, 8);
+      this.sharedDotGeometry.userData.shared = true;
+    }
+    return this.sharedDotGeometry;
+  }
+  pathMaterial(color, kind) {
+    this.sharedPathMaterials ??= new Map();
+    const key = `${kind}:${color}`;
+    let material = this.sharedPathMaterials.get(key);
+    if (!material) {
+      material = kind === 'dot'
+        ? new THREE.MeshBasicMaterial({color})
+        : new THREE.LineDashedMaterial({color, dashSize: .16, gapSize: .13, transparent: true, opacity: .65});
+      material.userData.shared = true;
+      this.sharedPathMaterials.set(key, material);
+    }
+    return material;
+  }
+
   // ---------- konstruksi scene ----------
   static clearGroup(group) {
     while (group.children.length) {
       const object = group.children[0];
       group.remove(object);
       object.traverse(child => {
-        child.geometry?.dispose();
-        if (child.material) for (const m of Array.isArray(child.material) ? child.material : [child.material]) m.dispose();
+        // Sumber daya bertanda `userData.shared` dipakai ulang antar-build (lihat
+        // dotGeometry()/pathMaterial()); men-dispose-nya akan mengosongkan buffer
+        // yang masih dipakai objek lain.
+        if (child.geometry && !child.geometry.userData.shared) child.geometry.dispose();
+        if (child.material) {
+          for (const m of Array.isArray(child.material) ? child.material : [child.material]) {
+            if (!m.userData.shared) m.dispose();
+          }
+        }
       });
     }
   }
@@ -258,11 +324,12 @@ export class SceneRenderer {
     for (const a of tracks) {
       if (a.visible === false || a.keys.length < 2) continue;
       const points = a.keys.map(k => new THREE.Vector3(k.x, .13, k.z));
-      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), new THREE.LineDashedMaterial({color: a.color, dashSize: .16, gapSize: .13, transparent: true, opacity: .65}));
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), this.pathMaterial(a.color, 'line'));
       line.computeLineDistances();
       this.pathsGroup.add(line);
+      const dotGeometry = this.dotGeometry(), dotMaterial = this.pathMaterial(a.color, 'dot');
       for (const p of points) {
-        const dot = new THREE.Mesh(new THREE.SphereGeometry(.075, 8, 8), new THREE.MeshBasicMaterial({color: a.color}));
+        const dot = new THREE.Mesh(dotGeometry, dotMaterial);
         dot.position.copy(p);
         this.pathsGroup.add(dot);
       }
@@ -367,7 +434,7 @@ export class SceneRenderer {
       return;
     }
     const oldBackground = this.scene.background;
-    this.scene.background = new THREE.Color('#dbdfd1');
+    this.scene.background = this.povBackground;
     this.pathsGroup.visible = false;
     this.helper.visible = false;
     this.cameraMarker.visible = false;
@@ -396,8 +463,19 @@ export class SceneRenderer {
     this.grid.visible = true;
   }
 
-  /** Menggambar viewport utama: observer, atau kamera final dengan letterbox 16:9. */
-  renderViewport(view) {
+  /**
+   * Menggambar viewport utama: observer, atau kamera final dengan letterbox 16:9.
+   *
+   * Preview kamera kanan dirender pada renderer kedua beresolusi 1280×720 dengan
+   * shadow map — biayanya sekelas render viewport utama. Mengulangnya setiap frame
+   * berarti scene digambar dua kali per frame. Preview dibatasi 30 fps
+   * (`povFps`); ekspor memakai `forcePov` sehingga setiap frame yang direkam tetap
+   * digambar. `preserveDrawingBuffer` pada renderer POV membuat isi canvas tetap
+   * valid di antara render, sehingga thumbnail tetap dapat diambil kapan saja.
+   */
+  renderViewport(view, {forcePov = false} = {}) {
+    // Menggambar ke konteks yang hilang hanya menghasilkan error berulang.
+    if (this.contextLost) return;
     this.controls.update();
     if (this.viewMode === 'camera') {
       const w = this.viewport.clientWidth, h = this.viewport.clientHeight;
@@ -413,8 +491,68 @@ export class SceneRenderer {
       this.renderer.setScissorTest(false);
       this.renderer.setViewport(0, 0, w, h);
     } else this.renderer.render(this.scene, this.observer);
-    this.renderPOV(view);
+    const now = performance.now();
+    if (forcePov || now - this.lastPovAt >= 1000 / this.povFps) {
+      this.lastPovAt = now;
+      this.renderPOV(view);
+    }
     this.updateLabels(view);
+  }
+
+  /**
+   * Meminta browser memulihkan konteks yang hilang (F6-05).
+   * Ekstensi `WEBGL_lose_context` tidak selalu tersedia; bila tidak ada, pemanggil
+   * harus menawarkan muat ulang halaman.
+   * @returns {boolean} true bila permintaan pemulihan benar-benar dikirim
+   */
+  restoreContext() {
+    try {
+      if (!this.loseContextExtension) return false;
+      this.loseContextExtension.restoreContext();
+      return true;
+    } catch {return false;}
+  }
+
+  /** Hanya untuk uji (tests/capability-browser.mjs): mensimulasikan hilangnya konteks. */
+  loseContext() {
+    try {
+      if (!this.loseContextExtension) return false;
+      this.loseContextExtension.loseContext();
+      return true;
+    } catch {return false;}
+  }
+
+  /**
+   * Melepas seluruh sumber daya GPU (F6-03).
+   * Dipanggil saat editor ditutup/berpindah proyek. Tanpa ini, geometri, material,
+   * texture dan program shader tetap dipegang driver sampai tab ditutup.
+   */
+  dispose() {
+    for (const group of [this.roomsGroup, this.actorsGroup, this.decorGroup, this.pathsGroup]) {
+      SceneRenderer.clearGroup(group);
+    }
+    this.scene.traverse(object => {
+      if (object.geometry && !object.geometry.userData.shared) object.geometry.dispose();
+      const material = object.material;
+      if (!material) return;
+      for (const m of Array.isArray(material) ? material : [material]) {
+        if (!m.userData.shared) m.dispose();
+      }
+    });
+    this.sharedDotGeometry?.dispose();
+    this.sharedDotGeometry = null;
+    for (const material of this.sharedPathMaterials?.values() ?? []) material.dispose();
+    this.sharedPathMaterials = null;
+    this.helper.dispose?.();
+    this.controls.dispose();
+    this.renderer.dispose();
+    this.povRenderer.dispose();
+    this.renderer.domElement.remove();
+    this.povRenderer.domElement.remove();
+    this.labelLayer.innerHTML = '';
+    this.labels.length = 0;
+    this.actorMeshes.clear();
+    this.roomMeshes.clear();
   }
 
   // ---------- picking ----------

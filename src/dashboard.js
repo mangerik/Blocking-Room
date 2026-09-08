@@ -13,6 +13,7 @@ import {bootstrapDashboard} from './bootstrap.js';
 import {cloneProjectDocument, emptyDocument} from './document.js';
 import {initialProject} from './model.js';
 import {openProjectData} from './migrate.js';
+import {metrics} from './metrics.js';
 import {SchemaTooNewError} from './schema.js';
 import {DASHBOARD_ROUTE, TRASH_ROUTE, projectRoute} from './routing.js';
 import {setActiveProjectId} from './storage.js';
@@ -292,9 +293,15 @@ export async function mountDashboard({
     const templateId = $('#dash-new-template').value;
     const template = TEMPLATES.find(t => t.id === templateId) ?? TEMPLATES[0];
     try {
+      const started = performance.now();
       const doc = template.build();
       doc.title = uniqueTitle(title, projects.map(p => p.title));
       await repository.saveDocument(doc, {revision: true, revisionToken: Date.now()});
+      // F6-06: hanya label template dan angka; judul proyek tidak pernah dicatat.
+      metrics.record('project_created', {
+        storage: 'local', template: template.id === 'demo' ? 'demo' : 'blank',
+        duration_ms: Math.round(performance.now() - started), schemaVersion: doc.schemaVersion,
+      });
       await openProject(doc.id);
     } catch (error) {fail(error, 'Gagal membuat proyek');}
   }
@@ -305,6 +312,7 @@ export async function mountDashboard({
       if (!doc) {notify('Dokumen proyek tidak ditemukan.'); return;}
       const copy = cloneProjectDocument(doc, {title: uniqueTitle(`${doc.title} (salinan)`.slice(0, 100), projects.map(p => p.title))});
       await repository.saveDocument(copy, {revision: true, revisionToken: Date.now()});
+      metrics.record('project_created', {storage: 'local', template: 'duplicate', schemaVersion: copy.schemaVersion});
       await refresh();
       notify(`Salinan dibuat: ${copy.title}.`);
     } catch (error) {fail(error, 'Gagal menduplikasi proyek');}
@@ -391,6 +399,7 @@ export async function mountDashboard({
         document_.title = uniqueTitle(document_.title, titles);
       }
       await repository.saveDocument(document_, {revision: true, revisionToken: Date.now()});
+      metrics.record('project_created', {storage: 'local', template: 'import', schemaVersion: document_.schemaVersion});
       for (const asset of importedAssets) {
         if (!asset?.dataUrl) continue;
         await repository.putThumbnail(document_.id, asset).catch(() => {/* aset opsional */});

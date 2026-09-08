@@ -22,7 +22,11 @@ export const LIMITS = {
   roomHeight: [1, 10],
   coordinate: [-1000, 1000],
   roomOrigin: [-100, 100],
-  documentBytes: 3_000_000,
+  // F6-03: diselaraskan dengan target PRD §9 ("proyek metadata ≤5 MB dibuka p95 ≤2 detik").
+  // Nilai ini deklaratif — `validateDocument` tidak menolak dokumen besar, karena
+  // menolak dokumen yang sudah tersimpan berarti mengunci pengguna dari karyanya.
+  // Dipakai sebagai ambang peringatan dan sebagai definisi "proyek besar" saat mengukur.
+  documentBytes: 5_000_000,
 };
 
 export const ASPECT_RATIOS = ['16:9', '9:16', '2.39:1', '4:3', '1:1'];

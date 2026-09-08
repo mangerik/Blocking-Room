@@ -202,7 +202,13 @@ ini tidak menambah dependency.
 7. Aktor atau kamera tanpa track pose, atau track dengan keyframe kosong/di luar durasi/waktu ganda.
 8. `locked` atau `visible` bukan boolean.
 9. Pintu di luar dinding, lebih dari dua per ruangan, atau lebih dari satu per dinding.
-10. Batas ukuran terlampaui (lihat `LIMITS`): 200 scene, 100 shot/scene, 50 aktor/scene, 30 set/scene, 2400 keyframe/track, nama ≤ 100 karakter, catatan ≤ 2000 karakter, berkas impor ≤ 3 MB.
+10. Batas ukuran terlampaui (lihat `LIMITS`): 200 scene, 100 shot/scene, 50 aktor/scene, 30 set/scene, 2400 keyframe/track, nama ≤ 100 karakter, catatan ≤ 2000 karakter.
+
+**`LIMITS.documentBytes` = 5 000 000 B (keputusan F6-03).** Sebelumnya 3 000 000 B, sementara PRD §9 menargetkan "buka proyek p95 ≤2 detik untuk proyek metadata **≤5 MB** tanpa aset" — dua angka yang saling bertentangan. Angka PRD yang dipakai, dan `src/schema.js` diselaraskan.
+
+Nilai ini **deklaratif**: `validateDocument` tidak menolak dokumen yang melewatinya. Alasannya bukan kelalaian — menolak dokumen yang **sudah** tersimpan berarti mengunci pengguna dari karyanya sendiri, persis kegagalan yang paling ingin dihindari PRD (kehilangan data). Fungsinya adalah (a) definisi "proyek besar" untuk pengukuran, dan (b) ambang peringatan bila kelak diperlukan. Batas ukuran yang benar-benar menolak input hanya ada pada berkas paket impor (`src/package.js`), karena di sana penolakan tidak menghilangkan data yang sudah dimiliki pengguna.
+
+Terukur pada F6-03: dokumen 5 023 714 B (165 scene, hasil menggandakan fixture beban) dibuka p95 336 ms — jauh di bawah target 2 detik. Lihat `docs/PERF-BASELINE.md` §6.
 
 Validator murni: melempar `Error` berbahasa Indonesia dan tidak pernah menulis ke penyimpanan. Satu-satunya perubahan yang dilakukannya adalah normalisasi default opsional (`normalizeDocument`) dan pengurutan keyframe.
 

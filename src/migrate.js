@@ -95,3 +95,59 @@ export function openProjectData(input, options = {}) {
   validateDocument(document);
   return {document, backup, migrated: version === 1, sourceVersion: version};
 }
+
+/**
+ * Ekspor balik v2 → v1 (F6-07, PRD §14 poin 6).
+ *
+ * Dipakai untuk rollback aplikasi: build lama hanya mengenal JSON v1, sedangkan
+ * data pengguna sudah berbentuk dokumen v2. Fungsi ini menghasilkan satu berkas v1
+ * dari SATU scene dan SATU shot — itu memang seluruh kapasitas format v1.
+ *
+ * Yang hilang saat menurunkan versi (harus dikatakan, bukan disembunyikan):
+ * scene lain, shot lain, `fps`, `aspectRatio`, catatan scene/shot, `assetRef`,
+ * `thumbnailRef` dan metadata proyek. Dokumen v2 sumber TIDAK diubah dan tidak
+ * dihapus; berkas v1 adalah salinan tambahan.
+ *
+ * @param {object} doc dokumen v2
+ * @param {{sceneId?:string, shotId?:string}} pick scene/shot yang diekspor
+ * @returns {{data:object, dropped:string[]}} data v1 dan daftar hal yang tidak terbawa
+ */
+export function exportAsV1(doc, {sceneId = doc.activeSceneId, shotId} = {}) {
+  const scene = doc.scenes.find(s => s.id === sceneId) ?? doc.scenes[0];
+  if (!scene) throw new Error('Dokumen tidak memiliki scene.');
+  const shot = scene.shots.find(s => s.id === (shotId ?? scene.activeShotId)) ?? scene.shots[0];
+  if (!shot) throw new Error('Scene tidak memiliki shot.');
+
+  const keysOf = objectId => clone(shot.tracks.find(t => t.objectId === objectId)?.keys ?? []);
+  const actors = scene.actors.map(actor => ({
+    id: actor.id, name: actor.name, color: actor.color, height: actor.height,
+    keys: keysOf(actor.id), locked: actor.locked ?? false, visible: actor.visible !== false,
+  }));
+  const rooms = scene.setObjects.map(room => ({
+    id: room.id, name: room.name, x: room.x, z: room.z, w: room.w, d: room.d, h: room.h,
+    color: room.color, locked: room.locked ?? true, visible: room.visible !== false,
+    doors: clone(room.doors ?? []),
+  }));
+  const camera = shot.camera
+    ? {
+      id: shot.camera.id, name: shot.camera.name, focal: shot.camera.focal,
+      target: shot.camera.targetId ?? '', keys: keysOf(shot.camera.id),
+      locked: shot.camera.locked ?? false, visible: shot.camera.visible !== false,
+    }
+    : null;
+
+  const dropped = [];
+  if (doc.scenes.length > 1) dropped.push(`${doc.scenes.length - 1} scene lain`);
+  if (scene.shots.length > 1) dropped.push(`${scene.shots.length - 1} shot lain`);
+  if (scene.notes) dropped.push('catatan scene');
+  if (shot.notes) dropped.push('catatan shot');
+  if (shot.fps !== DEFAULT_FPS) dropped.push(`fps ${shot.fps}`);
+  if (shot.aspectRatio !== DEFAULT_ASPECT_RATIO) dropped.push(`aspect ratio ${shot.aspectRatio}`);
+  if (doc.thumbnailRef || scene.thumbnailRef) dropped.push('thumbnail');
+  if ((doc.assets ?? []).length) dropped.push('aset');
+
+  return {
+    data: {version: 1, title: doc.title, duration: shot.duration, actors, rooms, camera},
+    dropped,
+  };
+}

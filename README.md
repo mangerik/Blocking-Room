@@ -347,10 +347,14 @@ Key design rules:
 │   ├── schema.js              # Schema v2 validator and limits
 │   ├── migrate.js             # Version 1 → version 2 migration
 │   ├── package.js             # `.blockingroom.json` package build/read with checksums
-│   ├── scene-renderer.js      # Three.js boundary
+│   ├── scene-renderer.js      # Three.js boundary, context-loss handling, dispose
 │   ├── timeline-engine.js     # Sampling, time formatting, keyframe helpers
 │   ├── export-service.js      # MediaRecorder video export
 │   ├── storage.js             # The only module touching localStorage
+│   ├── capabilities.js        # Central browser capability detection (no UA sniffing)
+│   ├── no-webgl.js            # Fallback screen when WebGL2 is unavailable
+│   ├── metrics.js             # Local-only metrics with a closed property schema
+│   ├── flags.js               # Local feature flags (dashboard flag for the pilot)
 │   ├── model.js               # Demo project, keyframe sampling, version 1 validation
 │   ├── history.js             # Bounded undo/redo project snapshots
 │   ├── spatial.js             # Walk cycle, door geometry, wall-crossing checks
@@ -364,11 +368,21 @@ Key design rules:
 │   ├── walk-doors-delete.mjs  # Walk, door, delete, empty-camera coverage
 │   ├── migration-browser.mjs  # Version 1 → 2 migration in a real browser
 │   ├── repository-browser.mjs # Autosave, recovery, multi-tab, 100 edit/save cycles
-│   └── dashboard-browser.mjs  # Dashboard, scenes, trash, package import/export
+│   ├── dashboard-browser.mjs  # Dashboard, scenes, trash, package import/export
+│   ├── capability-browser.mjs # Context loss, no-WebGL fallback, metrics, flags, v1 export
+│   ├── a11y-browser.mjs       # Accessibility audit: names, focus, contrast, touch targets
+│   ├── gate-r1-browser.mjs    # Release-gate bug hunt: lock bypass, data loss, migration
+│   └── perf-browser.mjs       # Performance harness (input latency, playback, open, memory)
 ├── docs/
 │   ├── PRD.md                 # Product requirements and release scope
 │   ├── DATA-MODEL.md          # Schema v2 contract, storage, trash, package format
 │   ├── AUDIT.md               # Current behavior, evidence, and risks
+│   ├── PERF-BASELINE.md       # Reference device, load fixtures, measured performance
+│   ├── A11Y-AUDIT.md          # Accessibility findings: fixed and still open
+│   ├── BROWSER-SUPPORT.md     # Support matrix derived from capability detection
+│   ├── ROLLOUT.md             # Feature flag, migration backups, rollback procedure
+│   ├── GATE-R1.md             # Release gate R1 evidence matrix (PR-01…PR-07)
+│   ├── PILOT-PROTOCOL.md      # Pilot task protocol (prepared, not yet run)
 │   └── handoff/               # Per-phase implementation reports
 ├── plan.md                    # Phased implementation plan derived from the PRD
 ├── package.json
@@ -407,13 +421,21 @@ Terminal 2:
 npm run test:browser
 ```
 
-Browser tests write screenshots, JSON fixtures, and test videos to `artifacts/`, which is ignored by Git. They cover the main Three.js workflow, keyframes, camera preview, lock/hide safety, direct viewport manipulation, undo/redo grouping, project round-trips, procedural walking, real doorway geometry, deletion, empty-camera recovery, responsive overflow, video download, version 1 migration, atomic autosave and recovery snapshots, multi-tab isolation, and the dashboard journey (create, add scene, switch project, reload, duplicate, trash restore, package round-trip, legacy import, 44 px touch targets, 390 px layout).
+Browser tests write screenshots, JSON fixtures, and test videos to `artifacts/`, which is ignored by Git. They cover the main Three.js workflow, keyframes, camera preview, lock/hide safety, direct viewport manipulation, undo/redo grouping, project round-trips, procedural walking, real doorway geometry, deletion, empty-camera recovery, responsive overflow, video download, version 1 migration, atomic autosave and recovery snapshots, multi-tab isolation, the dashboard journey (create, add scene, switch project, reload, duplicate, trash restore, package round-trip, legacy import, 44 px touch targets, 390 px layout), WebGL context loss and recovery, the no-WebGL fallback, local metrics, the dashboard feature flag, version 1 export for rollback, the accessibility audit, and a release-gate bug hunt for lock bypass and data loss.
 
-Tested locally during prototype development with Node.js 22 and stable Chrome on macOS. Passing these tests does not yet certify every browser, mobile interaction, accessibility target, or GPU configuration.
+### Performance harness
+
+```bash
+npm run test:perf
+```
+
+Measures input-to-viewport latency, 60 second playback frame times, project open time, dashboard reads, and GPU resource trends against the load fixture. It writes `artifacts/perf-baseline.json` and asserts nothing: measured numbers and their limits are recorded in [docs/PERF-BASELINE.md](docs/PERF-BASELINE.md).
+
+Tested locally during prototype development with Node.js 22 and stable Chrome on macOS. Passing these tests does not yet certify every browser, mobile interaction, accessibility target, or GPU configuration. Screen reader behavior, Edge, Safari, Firefox, and lower-end hardware remain unverified — see [docs/BROWSER-SUPPORT.md](docs/BROWSER-SUPPORT.md) and [docs/A11Y-AUDIT.md](docs/A11Y-AUDIT.md).
 
 ## Known limitations
 
-- Only one active local project is available; there is no dashboard, cloud sync, account, or collaboration.
+- Everything is local: multiple projects and scenes exist through the dashboard, but there is no cloud sync, account, or collaboration.
 - A scene supports zero or one active camera and up to 50 actors, 30 rooms, and 120 seconds.
 - Actors are geometric mannequins. The procedural walk is a staging cue, not a rigged animation with foot IK.
 - Rooms are rectangular and expose only left/back walls. Doors are always open and limited to those walls.

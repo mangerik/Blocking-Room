@@ -159,7 +159,11 @@ assert.ok(JSON.stringify(await savedDoc(second)).includes('Ditulis setelah ambil
 const originalId = await second.evaluate(() => window.blockingRoom.getProjectId());
 const originalDoc = await savedDoc(second);
 await second.evaluate(() => document.getElementById('open-copy').click());
-await second.waitForFunction(id => window.blockingRoom.getProjectId() !== id, originalId, {timeout: 8000});
+// `?.` disengaja: "Buka salinan" memuat ulang halaman, sehingga predikat ini dapat
+// dievaluasi pada dokumen baru sebelum `src/app.js` selesai memasang kait uji.
+// Tanpa optional chaining, suite gagal secara acak karena balapan itu — bukan karena
+// isolasi proyek gagal (asersi isolasinya sendiri tidak diubah).
+await second.waitForFunction(id => window.blockingRoom?.getProjectId() !== id, originalId, {timeout: 15000});
 await second.waitForSelector('#viewport canvas');
 const copyId = await second.evaluate(() => window.blockingRoom.getProjectId());
 assert.notEqual(copyId, originalId);

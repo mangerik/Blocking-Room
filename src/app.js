@@ -19,6 +19,8 @@
 // dari editor (tombol “Semua proyek”) dan memiliki empty state sendiri.
 import {parseRoute} from './routing.js';
 import {setActiveProjectId} from './storage.js';
+import {capabilities} from './capabilities.js';
+import {readFlag} from './flags.js';
 import './style.css';
 
 const route = parseRoute(location.hash);
@@ -32,9 +34,26 @@ window.addEventListener('hashchange', () => {
   location.reload();
 });
 
-if (route.name === 'dashboard') {
+// F6-07: dashboard berada di balik feature flag selama pilot (PRD §14). Bila flag
+// dimatikan, rute dashboard dialihkan ke editor proyek terakhir; data tidak diubah
+// sama sekali, jadi menyalakan flag kembali memunculkan seluruh daftar proyek.
+const dashboardEnabled = readFlag('dashboard');
+// URL harus jujur: bila dashboard dimatikan, hash rute dashboard dibuang supaya
+// pengguna tidak melihat `#/` sementara yang tampil adalah editor.
+if (route.name === 'dashboard' && !dashboardEnabled) {
+  history.replaceState(null, '', location.pathname + location.search);
+}
+
+if (route.name === 'dashboard' && dashboardEnabled) {
   const {mountDashboard} = await import('./dashboard.js');
   await mountDashboard({route: route.view});
+} else if (!capabilities().webgl) {
+  // F6-05: tanpa WebGL2 editor tidak dapat dibuka. Router memutuskan lebih dahulu
+  // supaya Three.js tidak pernah diunduh dan `new WebGLRenderer()` tidak melempar
+  // error mentah ke layar kosong. Dashboard dan ekspor JSON tetap bisa dipakai.
+  if (route.projectId) setActiveProjectId(route.projectId);
+  const {mountNoWebGL} = await import('./no-webgl.js');
+  await mountNoWebGL({projectId: route.projectId ?? null});
 } else {
   // Editor: `blocking-room.activeProject` adalah kontrak yang sudah dipakai bootstrap.
   if (route.projectId) setActiveProjectId(route.projectId);
