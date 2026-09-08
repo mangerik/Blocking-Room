@@ -67,6 +67,10 @@ const MARKUP = `
     <span id="export-progress-text"></span>
   </div>
   <p class="export-message" id="export-message" role="status"></p>
+  <div class="export-files" id="export-files" hidden>
+    <p class="hint" id="export-files-hint"></p>
+    <ul id="export-files-list"></ul>
+  </div>
 </div>
 <div class="export-actions">
   <button class="primary" id="export-start" type="button">Mulai ekspor</button>
@@ -118,8 +122,74 @@ export function createExportDialog(deps) {
     storyboard: $('export-storyboard'), shotList: $('export-shotlist'),
     progressRow: $('export-progress-row'), progress: $('export-progress'), progressText: $('export-progress-text'),
     message: $('export-message'),
+    files: $('export-files'), filesHint: $('export-files-hint'), filesList: $('export-files-list'),
     start: $('export-start'), retry: $('export-retry'), cancel: $('export-cancel'), close: $('export-close'),
   };
+
+  // ------------------------------------------------------------------ pengiriman berkas
+  //
+  // Batch shot menghasilkan banyak berkas (video + PNG storyboard + shot list). Memanggil
+  // `download()` beberapa kali dalam satu tick membuat Chrome menampilkan izin "Unduh
+  // beberapa berkas" dan dapat MENJATUHKAN unduhan berikutnya tanpa pesan apa pun
+  // (risiko yang dicatat `docs/handoff/phase5-report.md`). Dua penanganan di sini:
+  //
+  // 1. Unduhan diserialkan dengan jeda `DOWNLOAD_GAP_MS`, jadi tidak pernah ada dua
+  //    unduhan dalam satu tick.
+  // 2. Setiap berkas yang dihasilkan tetap disimpan di dialog sebagai tombol "Unduh
+  //    ulang", sehingga berkas yang diblokir browser tidak hilang bersama job-nya.
+  //
+  // Blob ditahan dengan batas jumlah dan ukuran supaya batch panjang tidak menghabiskan
+  // memori; entri terlama dibuang lebih dahulu dan dinyatakan pada UI.
+  const DOWNLOAD_GAP_MS = 300;
+  const KEEP_FILES = 24;
+  const KEEP_BYTES = 250 * 1024 * 1024;
+  let produced = [];        // [{name, blob, bytes}] hasil job terakhir
+  let deliverChain = Promise.resolve();
+
+  const wait = ms => new Promise(resolve => scope.setTimeout(resolve, ms));
+
+  function rememberFile(name, blob) {
+    produced.push({name, blob, bytes: blob.size ?? 0});
+    let dropped = 0;
+    const total = () => produced.reduce((sum, item) => sum + item.bytes, 0);
+    while (produced.length > KEEP_FILES || (produced.length > 1 && total() > KEEP_BYTES)) {
+      produced.shift();
+      dropped += 1;
+    }
+    renderFiles(dropped);
+  }
+
+  function renderFiles(dropped = 0) {
+    if (!produced.length) {els.files.hidden = true; els.filesList.textContent = ''; return;}
+    els.files.hidden = false;
+    els.filesHint.textContent = produced.length === 1
+      ? 'Berkas hasil ekspor. Bila browser memblokir unduhan otomatis, unduh ulang dari sini.'
+      : `${produced.length} berkas hasil ekspor. Browser dapat meminta izin “unduh beberapa berkas”; `
+        + `yang tertahan dapat diunduh ulang dari daftar ini${dropped ? ' (berkas terlama dilepas agar tidak menghabiskan memori)' : ''}.`;
+    els.filesList.textContent = '';
+    for (const item of produced) {
+      const li = doc.createElement('li');
+      const button = doc.createElement('button');
+      button.type = 'button';
+      button.className = 'ghost small';
+      button.dataset.redownload = item.name;
+      button.textContent = `Unduh ulang ${item.name}`;
+      button.title = `${item.name} · ${formatBytes(item.bytes)}`;
+      button.onclick = () => deps.download(item.blob, item.name);
+      li.appendChild(button);
+      els.filesList.appendChild(li);
+    }
+  }
+
+  /** Mengunduh satu berkas, diserialkan terhadap unduhan lain, dan mencatatnya di dialog. */
+  function deliver(blob, name) {
+    rememberFile(name, blob);
+    deliverChain = deliverChain
+      .then(() => deps.download(blob, name))
+      .then(() => wait(DOWNLOAD_GAP_MS))
+      .catch(() => {/* kegagalan satu unduhan tidak boleh menghentikan sisanya */});
+    return deliverChain;
+  }
 
   let snapshot = null;      // dokumen yang sedang ditampilkan dialog
   let entries = [];         // seluruh shot proyek
@@ -338,8 +408,10 @@ export function createExportDialog(deps) {
       extension: els.codec.value.startsWith('rt:') ? realtimeExtension(els.codec.value.slice(3)) : 'webm',
       realtime: els.codec.value.startsWith('rt:'),
     });
+    const fileCount = picked.length * (1 + (els.storyboard.checked ? 3 : 0)) + (els.shotList.checked ? 2 : 0);
     els.summary.textContent = `${picked.length} shot · ${frames} frame · ${size.width}×${size.height}`
       + ` · perkiraan ${formatBytes(bytes)} · berkas pertama: ${name}`
+      + (fileCount > 1 ? ` · ${fileCount} berkas akan diunduh (browser dapat meminta izin “unduh beberapa berkas”)` : '')
       + (notice ? ` · ${notice}` : '');
   }
 
@@ -355,6 +427,8 @@ export function createExportDialog(deps) {
   els.rangeMode.addEventListener('change', () => {els.rangeEnd.dataset.mode = ''; updateRangeUi(); updateSummary();});
   els.rangeStart.addEventListener('input', updateSummary);
   els.rangeEnd.addEventListener('input', updateSummary);
+  els.storyboard.addEventListener('change', updateSummary);
+  els.shotList.addEventListener('change', updateSummary);
   els.close.addEventListener('click', () => close());
   els.cancel.addEventListener('click', () => {
     running?.queue.cancelAll();
@@ -441,7 +515,7 @@ export function createExportDialog(deps) {
     const frames = storyboardFrames({duration: unit.entry.durationSeconds, fps: unit.fps});
     for (const item of frames) {
       const blob = await unit.source.toPng(item.time, item.frame);
-      deps.download(blob, buildFileName({
+      await deliver(blob, buildFileName({
         project: snapshot.title, scene: unit.entry.sceneName, shot: unit.entry.shotName,
         extension: 'png', suffix: `${item.label}-f${item.frame}`,
       }));
@@ -451,8 +525,8 @@ export function createExportDialog(deps) {
   function emitShotList() {
     const rows = collectShots(snapshot);
     const base = sanitizeSegment(snapshot.title, 'proyek');
-    deps.download(new Blob([shotListJson(snapshot, rows)], {type: 'application/json'}), `${base}_shot-list.json`);
-    deps.download(new Blob([shotListCsv(rows)], {type: 'text/csv;charset=utf-8'}), `${base}_shot-list.csv`);
+    deliver(new Blob([shotListJson(snapshot, rows)], {type: 'application/json'}), `${base}_shot-list.json`);
+    deliver(new Blob([shotListCsv(rows)], {type: 'text/csv;charset=utf-8'}), `${base}_shot-list.csv`);
   }
 
   async function start() {
@@ -486,6 +560,8 @@ export function createExportDialog(deps) {
       : 'Ekspor deterministik berjalan. Tab boleh berada di latar belakang.', 'info');
     deps.setBusy(true);
 
+    produced = [];
+    renderFiles();
     const queue = new ExportQueue();
     const units = [];
     running = {queue, realtime: null};
@@ -506,7 +582,7 @@ export function createExportDialog(deps) {
         running.realtime = unit.realtime ? unit.job : null;
         try {
           const result = await unit.job.run();
-          deps.download(result.blob, result.fileName);
+          await deliver(result.blob, result.fileName);
           if (els.storyboard.checked) await emitStoryboard(unit);
           ok += 1;
           setMessage(result.realtime
@@ -521,6 +597,9 @@ export function createExportDialog(deps) {
         }
       }
       if (els.shotList.checked && !queue.cancelled) emitShotList();
+      // Dialog baru boleh dianggap selesai setelah rantai unduhan berjeda habis;
+      // kalau tidak, "Tutup" dapat aktif sementara berkas terakhir belum terkirim.
+      await deliverChain;
     } finally {
       for (const unit of units) unit.source.dispose();
       running = null;

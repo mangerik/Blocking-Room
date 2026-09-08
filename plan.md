@@ -46,6 +46,14 @@ Referensi: ED-01–ED-05, pembaruan implementasi PRD, M0.
 
 ### Sudah diimplementasikan
 
+*F0-01…F0-07 adalah baseline R0/R0.1 yang **sudah ada sebelum plan ini ditulis**, bukan task
+yang dieksekusi oleh plan ini — karena itu keduanya tidak punya baris di tabel “Log
+pelaksanaan”. Buktinya adalah suite regresi yang menjaganya dan tetap dijalankan pada setiap
+gate: `tests/model.test.js`, `tests/history.test.js`, `tests/spatial.test.js`,
+`tests/browser-smoke.mjs`, `tests/editor-regression.mjs`, `tests/walk-doors-delete.mjs`, serta
+matriks ED-01…ED-05 di `docs/GATE-R2.md` §3b. F0-08…F0-10 adalah task plan ini dan punya baris
+log sendiri.*
+
 - [x] **F0-01 · P0:** Undo/redo 100 langkah sesi; satu drag, gestur keyboard, atau rekaman menjadi satu langkah.
 - [x] **F0-02 · P0:** Lock karakter/lokasi/kamera, lokasi default terkunci, dan picking yang tidak menggeser ruangan tanpa seleksi eksplisit.
 - [x] **F0-03 · P0:** Hide/show geometri, label, jalur dan output; status tersimpan dalam JSON.
@@ -161,7 +169,7 @@ Dependensi: Fase 4. Task riset F5-01 dapat dimulai setelah schema shot F1 tersed
 - [x] **F5-05 · P0:** Pertahankan fallback MediaRecorder real-time dengan label keterbatasan. Jangan menyatakan fallback ini memenuhi gate deterministik. — `src/export/realtime.js` memakai kembali `src/export-service.js`; label “Real-time (tidak frame-akurat)” di dialog dan akhiran `_realtime` pada nama berkas.
 - [x] **F5-06 · P1:** Tambah antrean/batch shot lokal, burn-in opsional nama shot/timecode/lensa, PNG storyboard dan shot list. Overlay editor hanya ikut bila dipilih. — `ExportQueue`, `src/export/burn-in.js`, `src/export/shot-list.js`; `renderPOV(..., {keepOverlays})` menahan jalur/grid/safe area kecuali dicentang.
 - [x] **F5-07 · P0:** Verifikasi first/middle/last frame: posisi, orientasi, langkah kaki, pintu, visibility dan framing sesuai preview. Uji codec failure, cancellation, kamera hilang dan batas frame/range. — `tests/export-browser.mjs` (7 bagian) + `tests/export.test.js` (20 unit test struktur EBML dan fungsi murni).
-- [ ] **F5-08 · P0:** Jalankan gate R2 dan pilot Fase 6 sebelum rilis output produksi.
+- [x] **F5-08 · P0 (sebagian — hanya bagian gate):** Jalankan gate R2 dan pilot Fase 6 sebelum rilis output produksi. — **Gate R2 dijalankan dan LULUS**: `docs/GATE-R2.md` (matriks bukti per acceptance criteria SH-01/TL-01/TL-02/SC-01/CA-01/EX-01/EX-02/EX-03 + verifikasi ulang ED-01…ED-05 dan PR-01…PR-07). `npm test` 177/177, `npm run build` lulus, `npm run preview` lulus (`tests/preview-check.mjs`), `npm run test:browser` 12/12 suite, `repository-browser` dan `export-browser` masing-masing 3× berturut, `npm run test:perf` 3× berturut pasca schema v3. Tiga bug ditemukan dan diperbaiki (R2-01 session state basi, R2-02 duplikasi objek set terkunci, R2-03 404 pada build produksi). **Bagian “pilot” BELUM dijalankan dan tidak diklaim selesai**: menuntut 5–8 pembuat film sungguhan selama dua minggu dan tidak dapat diotomasi. Ia dilacak sebagai F6-10/F6-11/F6-12 yang tetap `[ ]`; protokolnya siap di `docs/PILOT-PROTOCOL.md`, dan apa yang dibutuhkan untuk memulainya ada di `docs/DECISIONS-NEEDED.md` §3. Karena itu **rilis output produksi belum boleh dinyatakan**.
 
 **Kriteria keluar:** EX-01 dan EX-02 terbukti melalui hasil file; output deterministik lolos hitungan frame dan kesetaraan pose; fallback jelas. EX-03 selesai atau tercatat sebagai scope susulan yang belum selesai.
 
@@ -179,10 +187,10 @@ Task QA/instrumentasi dimulai pada fase terkait, bukan ditunda sampai semua fitu
 - [x] **F6-06 · P0:** Tambahkan metrik lokal project open/create, autosave, command/history, export dan recovery. Telemetry eksternal opt-in; jangan kirim nama proyek, script atau data scene. — `src/metrics.js`: 10 event PRD §11 dengan **skema properti tertutup** (properti asing dibuang, angka dipaksa angka, teks hanya dari daftar tertutup → nilai lain menjadi `other`), ring buffer 300 event di localStorage, panel “Lihat metrik lokal” + ekspor JSON + hapus riwayat. Telemetry eksternal **tidak diimplementasikan**: hanya penanda opt-in disimpan, tanpa kode jaringan. 15 unit test (`tests/metrics.test.js`) + `tests/capability-browser.mjs` bagian 3 (judul proyek dan nama karakter tidak muncul di metrik; tidak ada request keluar setelah opt-in).
 - [x] **F6-07 · P0:** Siapkan build preview, flag dashboard saat pilot, backup migrasi, prosedur rollback dan pembaca schema baru yang stabil. Rollback aplikasi tidak menghapus data baru. — `npm run preview` diverifikasi pada build produksi; `src/flags.js` (`blocking-room.flags.dashboard`, default aktif; mati → editor proyek terakhir, hash dibersihkan, jalan ke dashboard disembunyikan, **data tidak disentuh**); `exportAsV1()` di `src/migrate.js` + tombol “Unduh JSON v1” di panel riwayat versi (v1→v2→v1 `deepEqual`, daftar `dropped` dilaporkan); `docs/ROLLOUT.md` memuat prosedur rollback, cara membaca `blocking-room.backup`, dan jaminan rollback tidak menghapus data v2. 14 unit test (`tests/rollout.test.js`) + `tests/capability-browser.mjs` bagian 4–5.
 - [x] **F6-08 · P0:** Gate R1: suite data/editor dan 100 siklus save/reload lulus; PR-01–PR-07 terpenuhi; tidak ada bug kehilangan data, lock bypass atau migrasi kritis terbuka. — `docs/GATE-R1.md` (matriks bukti per acceptance criteria). `npm test` 112/112, `npm run build` lulus, `npm run test:browser` 9/9 suite, 100 siklus save/reload lulus 3× berturut. `tests/gate-r1-browser.mjs` berburu bug: lock bypass lewat keyboard/inspector/DOM paksa/hapus/ruangan/objek tersembunyi, isolasi lock lintas scene, tab baca-saja di lapisan command, 30 gestur + reload segera, pindah scene saat save berjalan, impor v1 rusak, dan **PR-03 terukur** (simpan setelah gestur p95 261 ms ≤ 1 detik). Empat bug ditemukan dan diperbaiki; tidak ada bug kelas penghenti rilis yang terbuka.
-- [ ] **F6-09 · P0:** Gate R2: gate R1 tetap lulus; shot terisolasi; tidak ada mismatch preview/export kritis; frame-count, codec fallback dan cancellation terbukti.
-- [ ] **F6-10 · P0:** Jalankan pilot dengan 5–8 pembuat film: buat dua aktor, gerak kamera, ekspor, reopen dan recovery. Target ≥80% menyelesaikan tugas tanpa bantuan, median video pertama ≤10 menit.
-- [ ] **F6-11 · P0:** Pantau dua minggu: export success target ≥95%, kembali mengedit dalam tujuh hari ≥50%, kehilangan data tersimpan =0. Pisahkan baseline, target dan hasil observasi.
-- [ ] **F6-12 · P0:** Putuskan iterasi atau perluasan. Hentikan rollout bila kehilangan data; buat task mitigasi sebelum cloud/AI. Tentukan dan jalankan deployment produksi hanya ketika scope/lingkungan rilis sudah ditetapkan.
+- [x] **F6-09 · P0:** Gate R2: gate R1 tetap lulus; shot terisolasi; tidak ada mismatch preview/export kritis; frame-count, codec fallback dan cancellation terbukti. — **LULUS**, bukti di `docs/GATE-R2.md`. (1) Gate R1 tetap lulus: seluruh suite R1 dijalankan ulang tanpa satu asersi pun dilonggarkan, termasuk 100 siklus edit/save/reload 3× dan PR-03 terukur p95 260 ms. (2) Shot terisolasi bahkan melewati 6 undo + 6 redo, reload penuh dan penghapusan shot B (`tests/gate-r2-browser.mjs` §3). (3) Tidak ada mismatch preview/ekspor: 15 titik uji pada 5 kombinasi (16:9 / 9:16 / 2.39:1, 24 dan 30 fps, burn-in, aktor tersembunyi, prop + dinding modular v3) menyimpang 0,358–0,587 pada skala 0–255 (ambang 3), dengan pengaman bahwa scene memang bergerak antar-frame. (4) Frame-count `ffprobe` `vp9 1280x720 nb_read_frames=300 duration=10.000000` pada 3 jalan; fallback MediaRecorder berlabel “tidak frame-akurat”; pembatalan dan **kegagalan codec lewat dialog** (pesan + “Coba lagi”) tidak menghasilkan berkas. Perf pasca schema v3 diukur ulang 3 jalan dan **tidak ada metrik yang melewati target PRD** (`docs/PERF-BASELINE.md` §6 kolom “Setelah v3”). Suite baru `tests/gate-r2-browser.mjs` terdaftar pada `npm run test:browser`.
+- [ ] **F6-10 · P0:** Jalankan pilot dengan 5–8 pembuat film: buat dua aktor, gerak kamera, ekspor, reopen dan recovery. Target ≥80% menyelesaikan tugas tanpa bantuan, median video pertama ≤10 menit. — **Tidak dicentang: belum ada peserta.** Protokol lengkap siap dipakai apa adanya di `docs/PILOT-PROTOCOL.md`. Yang masih dibutuhkan (peserta, fasilitator, cara menyajikan build, persetujuan perekaman) beserta tiga pekerjaan teknis yang wajib selesai lebih dahulu (uji Edge, ukur perf pada perangkat kelas PRD, keputusan D-04) ada di `docs/DECISIONS-NEEDED.md` §3.
+- [ ] **F6-11 · P0:** Pantau dua minggu: export success target ≥95%, kembali mengedit dalam tujuh hari ≥50%, kehilangan data tersimpan =0. Pisahkan baseline, target dan hasil observasi. — **Tidak dicentang: bergantung F6-10** dan pada jendela waktu dua minggu yang tidak dapat dipercepat. Cara menghitung kelima metrik dari metrik lokal sudah ditulis di `docs/PILOT-PROTOCOL.md` §5.
+- [ ] **F6-12 · P0:** Putuskan iterasi atau perluasan. Hentikan rollout bila kehilangan data; buat task mitigasi sebelum cloud/AI. Tentukan dan jalankan deployment produksi hanya ketika scope/lingkungan rilis sudah ditetapkan. — **Tidak dicentang: bergantung hasil F6-10/F6-11**, dan bagian “deployment produksi” juga menunggu keputusan hosting (`docs/DECISIONS-NEEDED.md` §4.1). Kriteria keputusannya sudah ditetapkan **sebelum** pilot di `docs/PILOT-PROTOCOL.md` §7 supaya hasilnya tidak ditafsir belakangan.
 
 **Kriteria keluar:** bukti gate dan laporan pilot tersedia; gap memiliki keputusan tindak lanjut. Jangan menyatakan target tercapai hanya karena test otomatis lulus.
 
@@ -191,6 +199,16 @@ Task QA/instrumentasi dimulai pada fase terkait, bukan ditunda sampai semua fitu
 Tujuan: akses lintas perangkat dan review tanpa mengorbankan privasi/keamanan proyek.
 Referensi: CL-01, CL-02, scope R3 dan M6.
 Dependensi: hasil Fase 6; keputusan kebutuhan cloud, budget, region dan provider.
+
+**Seluruh task Fase 7 tidak dicentang dan tidak dikerjakan.** Penahannya bukan pekerjaan
+teknis melainkan dua keputusan yang belum ada — **D-01** (lokal dahulu atau cloud wajib)
+dan **D-07** (provider, region, budget, akses tim) — ditambah prasyarat "hasil Fase 6",
+yaitu pilot yang juga belum dijalankan. Opsi konkret untuk F7-01 beserta trade-off-nya
+(auth, database metadata, object storage, model biaya, kebijakan akses, dan hosting
+aplikasi) sudah ditulis **tanpa memilih vendor** di `docs/DECISIONS-NEEDED.md` §4,
+termasuk urutan pelaksanaan yang disarankan dan daftar apa yang sudah tersedia sehingga
+tidak perlu dibangun ulang (`revisionToken` monoton, `Revision`, kunci writer, paket
+berchecksum).
 
 - [ ] **F7-01 · P0:** Putuskan auth, database metadata, object storage, model biaya dan kebijakan akses. Dokumentasikan jalur pengguna lokal tanpa akun.
 - [ ] **F7-02 · P0:** Implementasikan owner/editor/viewer dengan pemeriksaan server per resource; proyek privat default dan akses aset terbatas.
@@ -205,6 +223,12 @@ Dependensi: hasil Fase 6; keputusan kebutuhan cloud, budget, region dan provider
 ## Fase 8 — Backlog eksplorasi setelah MVP
 
 Semua task di fase ini P2 dan belum menjadi komitmen rilis. Dahului implementasi dengan validasi kebutuhan dan spike terukur.
+
+**Seluruh task Fase 8 tidak dicentang dan tidak dikerjakan — sengaja, dan tanpa asumsi
+kerja yang dijalankan diam-diam.** Untuk setiap item, sinyal apa yang harus muncul lebih
+dahulu, spike apa yang mendahului implementasi, dan apa yang sudah tersedia di kode
+sekarang ditulis di `docs/DECISIONS-NEEDED.md` §5. Sebagian besar sinyal itu hanya dapat
+datang dari pilot (F6-10/F6-11), jadi Fase 8 secara praktis menunggu Fase 6 selesai.
 
 - [ ] **F8-01:** Import GLB karakter/props dan skala manusia — dependensi asset pipeline F3/F4; validasi batas ukuran/poligon/tekstur, lisensi dan tiga scene pengguna.
 - [ ] **F8-02:** Rig idle/walk/run/crouch, look-at kepala, foot IK dan rotasi penuh — dependensi F8-01/TL-02; bandingkan pemahaman blocking dengan langkah prosedural yang sudah ada.
@@ -245,13 +269,13 @@ Semua task di fase ini P2 dan belum menjadi komitmen rilis. Dahului implementasi
 
 | ID | Keputusan | Default dari PRD / usulan | Task yang bergantung |
 |---|---|---|---|
-| D-01 | Lokal dahulu atau cloud wajib? | R1 lokal tanpa akun | F1/F2; cloud sebelum F7 |
-| D-02 | Makna proyek dan ownership shot | Proyek film → scene → shot | F1-01 |
-| D-03 | Prioritas R2 | Shot/timeline/export sebelum GLB | F4/F5/F8-01 |
+| D-01 | Lokal dahulu atau cloud wajib? | **Asumsi kerja: R1 lokal tanpa akun**, sudah dijalankan penuh (IndexedDB, autosave, recovery, trash, paket; **tanpa satu pun kode jaringan** — diuji struktural di `tests/metrics.test.js` dan `tests/capability-browser.mjs` bagian 3). Belum diputuskan pemilik produk; menahan Fase 7. `docs/DECISIONS-NEEDED.md` §2 D-01 | F1/F2; cloud sebelum F7 |
+| D-02 | Makna proyek dan ownership shot | **Diputuskan Fase 1: Proyek (film) → banyak Scene → banyak Shot.** Kontrak di `docs/DATA-MODEL.md` §1–§4 dan `src/schema.js`; isolasi shot dibuktikan `tests/gate-r2-browser.mjs` §3 | F1-01 |
+| D-03 | Prioritas R2 | **Diputuskan: shot/timeline/export sebelum GLB.** Seluruh SH-01/TL-01/TL-02/SC-01/CA-01/EX-01/EX-02/EX-03 lulus gate R2 (`docs/GATE-R2.md` §3); import GLB tetap F8-01 dan belum dikerjakan | F4/F5/F8-01 |
 | D-04 | MP4 wajib, resolusi dan fps target? | Belum diputuskan; MediaRecorder lama tetap fallback. **Usulan F5-01 (`docs/SPIKE-ENCODER.md` §11):** default 30 fps (opsi 24/25, hanya integer), default 1280×720 (opsi 1920×1080, dimensi dibulatkan kelipatan 2), format default WebM/VP9 via WebCodecs + muxer WebM buatan sendiri (nol dependency, terbukti 300 frame / 10,000000 s lolos `ffprobe`), MP4/H.264 `avc1.640028` hanya bila dependency `mp4-muxer` (MIT) disetujui, fallback MediaRecorder real-time diberi label dan tidak dihitung memenuhi gate deterministik. Jangan minta `hardwareAcceleration: 'prefer-hardware'` (ditolak semua codec pada mesin uji) | F1-08, F5-01/F5-04 |
 | D-05 | Hide global atau editor/render terpisah? | **Diputuskan Fase 4: tetap global.** `visible:false` berarti hilang dari editor **dan** video (PRD ED-03). Pemisahan `hiddenInEditor`/`includeInRender` ditunda sampai ada kebutuhan tervalidasi; syarat migrasinya (hidden lama → keduanya) dicatat di `docs/DATA-MODEL.md` §8 | F4-09 |
 | D-06 | Rig, putaran >360° dan batas beban nyata | Langkah prosedural + yaw untuk baseline. **Diperjelas Fase 4b:** track rotasi kini terpisah dari posisi (prasyaratnya), tetapi putaran penuh >360° **tetap tidak didukung** — rotasi selalu mengambil jalur terpendek dan dua keyframe 0°/360° bukan padanannya. Menambahkannya menuntut track yaw tak dinormalisasi yang mengubah arti setiap keyframe rotasi yang sudah ada; dicatat di `docs/DATA-MODEL.md` §2 Track dan §8 | F6-01, F8-02 |
-| D-07 | Provider, region, budget, akses tim | Belum diputuskan | F7-01/F7-06 |
+| D-07 | Provider, region, budget, akses tim | **Belum diputuskan — terbuka.** Opsi konkret + trade-off untuk auth, database metadata, object storage, model biaya, kebijakan akses dan hosting aplikasi ditulis **tanpa memilih vendor** di `docs/DECISIONS-NEEDED.md` §4 | F7-01/F7-06 |
 
 Keputusan yang belum ada tidak menghentikan semua pekerjaan. Lanjutkan task independen dengan asumsi tertulis; tunda hanya implementasi yang benar-benar bergantung pada keputusan tersebut.
 
@@ -262,18 +286,27 @@ Untuk task implementasi, selesai berarti perilaku memenuhi acceptance criteria P
 Perintah baseline saat ini:
 
 ```sh
-npm test
-npm run build
-# Jalankan server di terminal terpisah untuk browser tests:
+npm test          # 177 unit test (node --test)
+npm run build     # Vite production build
+npm run check     # keduanya sekaligus
+
+# Browser tests — jalankan dev server di terminal terpisah lebih dahulu.
+# Chrome harus terpasang; Playwright memakai channel:'chrome' dan port 5174.
 npm run dev -- --port 5174 --strictPort
-# Chrome harus terpasang; tes memakai port 5174:
-node tests/browser-smoke.mjs
-node tests/editor-regression.mjs
-node tests/walk-doors-delete.mjs
-node tests/migration-browser.mjs
+npm run test:browser   # 12 suite berurutan (lihat docs/GATE-R2.md §2)
+
+# Harness performa (bukan bagian test:browser; headed, menulis artifacts/perf-baseline.json)
+PERF_LABEL="<perangkat>" npm run test:perf
+
+# Verifikasi build produksi (server berbeda: preview, bukan dev)
+npm run build && npm run preview -- --port 4174 --strictPort
+node tests/preview-check.mjs
 ```
 
-Tambahkan suite repository/migrasi, multi-tab, multi-scene/shot dan deterministic export saat fase terkait dibangun. Jalankan pengujian yang relevan terhadap perubahan; jalankan gate lengkap pada akhir fase/rilis.
+Jalankan pengujian yang relevan terhadap perubahan; jalankan gate lengkap pada akhir
+fase/rilis. Untuk gate, `repository-browser` dan `export-browser` dijalankan **3× berturut**
+(keduanya pernah flaky, dan gate yang flaky tidak dapat dipakai sebagai gate), dan
+`npm run test:perf` dijalankan 3× seperti diminta `docs/PERF-BASELINE.md` §2.
 
 ## Log pelaksanaan
 
@@ -293,21 +326,6 @@ Tambahkan suite repository/migrasi, multi-tab, multi-scene/shot dan deterministi
 | 2026-09-08 | F1-09 uji migrasi | Selesai | `tests/migrate.test.js` (kesetaraan pose vs golden Fase 0, roundtrip serialize, rollback, schema lebih baru), `tests/document.test.js`, `tests/migration-browser.mjs`. Gate akhir: `npm test` 41/41, `npm run build` lulus, 4 browser test lulus |
 | 2026-09-08 | F5-01 spike encoder | Selesai | `docs/SPIKE-ENCODER.md`; probe `tests/spike/encoder-probe.mjs` + `encoder-probe.html` di Chrome 152 macOS arm64. Bukti: `artifacts/encoder-probe.json` (66/78 config VideoEncoder didukung), muxer WebM minimal buatan sendiri menghasilkan `artifacts/encoder-probe-webcodecs.webm` — `ffprobe`: vp9 1280x720 30/1, `nb_read_frames=300`, `duration=10.000000`, seek 5 s berhasil. Tidak ada dependency baru; `npm test` 16/16 dan `npm run build` lulus |
 | 2026-09-08 | F6-01 perangkat referensi + fixture beban | Selesai | `docs/PERF-BASELINE.md` (perangkat: Apple M5 10-core / 16 GiB / macOS 26.2 / Chrome 152.0.7977.76 / ANGLE Metal, Node v22.21.1, viewport 1280×720, headed, flag `--enable-webgl --ignore-gpu-blocklist`; definisi p95 input→viewport, frame-time, dropped frames; tabel Baseline/Target/Hasil masih kosong). Fixture deterministik `tests/fixtures/load/generate.mjs` → `load-20a-10r-500k.json` (20 aktor, 10 ruang, 5 berpintu, 500 keyframe, shot 60 s, kamera bertarget, 11 objek terkunci / 3 tersembunyi; 97 088 B) dan `projects-100.json` (100 dokumen v2 ringkas, 2 355 943 B ≤ 5 MB). Dikunci `tests/load-fixtures.test.js` (6 test, termasuk `sampleScene` t=0/30/60 deterministik). `LIMITS` cukup; konflik `documentBytes` 3 MB vs target PRD 5 MB dicatat sebagai usulan, `src/schema.js` tidak diubah. `npm test` 47/47 |
-
-## Langkah berikutnya
-
-Fase 4 selesai untuk seluruh P0 (F4-01–F4-04, F4-10) ditambah F4-06. **Fase 4b menutup sisa
-P1-nya**: F4-05, F4-07 dan F4-08 dicentang setelah mendarat dalam satu migrasi
-`schemaVersion: 3`; F4-09 tetap tidak dicentang karena D-05 memutuskan hide tetap global dan
-kontrol eksplisitnya memang tidak dibuat. Berikutnya: **Fase 5** (ekspor presisi, F5-02–F5-06)
-lalu gate R2 (F6-09) — matriks bukti R2 kini dapat mengisi TL-02 dan SC-01 dari Fase 4b, bukan
-mencatatnya sebagai terbuka.
-
-Fase 0–3 selesai dan **gate R1 lulus** (laporan: `docs/handoff/phase0-1-report.md`, `phase2-report.md`, `phase3-report.md`, `phase6-f601-report.md`, `phase6-gate-r1-report.md`; bukti gate: `docs/GATE-R1.md`). F3-11 dan F6-02…F6-08 selesai.
-
-Lanjutkan ke **Fase 4** (shot list, timeline lanjutan, kamera per shot) di atas struktur scene yang sudah ada, lalu Fase 5 dan gate R2 (F6-09).
-
-Sisa Fase 6 yang **belum** dikerjakan dan tidak boleh dicentang tanpa pekerjaannya: F6-09 (gate R2, menunggu Fase 4–5), F6-10/F6-11/F6-12 (pilot manusia 5–8 pembuat film — protokolnya sudah siap di `docs/PILOT-PROTOCOL.md`). Sebelum pilot dimulai, dua hal wajib diselesaikan meskipun tidak menghalangi gate R1: uji Edge (`docs/BROWSER-SUPPORT.md` §5) dan pengukuran ulang F6-02/F6-03 pada perangkat kelas PRD 8 GB / GPU terintegrasi (`docs/PERF-BASELINE.md` §7).
 | 2026-09-08 | F2-01 ProjectRepository | Selesai | `src/repository.js`: 5 object store, index `projectId_createdAt`, satu transaksi untuk `documents`+`projects`+`revisions`, `saveDocumentImmediate` untuk penutupan tab, pemangkasan revisi (batas 20, minimal 10). Bukti: `tests/repository.test.js` (fake IndexedDB) + `tests/repository-browser.mjs` (Chrome nyata: metadata dan dokumen selalu satu `updatedAt`) |
 | 2026-09-08 | F2-02 migrasi via repository | Selesai | `src/bootstrap.js` + `src/storage.js`; sumber `blocking-room` tidak ditimpa, cadangan `blocking-room.backup`, penanda `blocking-room.migrated` ditulis setelah commit. Bukti: unit “migrasi berjalan sekali” dan “penanda tidak ditulis bila transaksi gagal”; `tests/migration-browser.mjs` |
 | 2026-09-08 | F2-03 autosave + revision token | Selesai | `src/autosave.js` leading + coalesce 250 ms; token berbasis jam agar tidak mundur setelah reload (regresi diuji di unit). Bukti: unit coalesce/stale-token; browser 100 siklus edit/save/reload tanpa beda data |
@@ -358,3 +376,59 @@ Sisa Fase 6 yang **belum** dikerjakan dan tidak boleh dicentang tanpa pekerjaann
 | 2026-09-08 | F5-06 batch, burn-in, storyboard, shot list (EX-03) | **Selesai** | `ExportQueue` menjalankan job berurutan (satu encoder aktif pada satu waktu) dengan progress per job dan satu tombol batal untuk seluruh antrean. Burn-in opsional (`src/export/burn-in.js`) menggambar nama scene · shot, lensa hasil interpolasi `sampleCamera`, dan timecode `MM:SS:FF` pada kanvas 2D di atas frame — kanvas komposit hanya dibuat bila memang ada yang digambar. PNG storyboard mengambil frame **awal/tengah/akhir yang benar-benar ada** (`total − 1`, bukan `duration`). Shot list JSON + CSV (BOM UTF-8, CRLF, escape RFC 4180) berisi seluruh shot proyek dari snapshot yang sama dengan yang dirender. Overlay editor (jalur gerak, grid, safe area, gizmo seleksi) **tidak** ikut kecuali dicentang — `SceneRenderer.renderPOV` menerima `{keepOverlays}` dan default-nya tetap menyembunyikan semuanya. Bukti: `tests/export-browser.mjs` bagian 6 — 2 shot → 2 webm + 6 PNG (`_awal-f0`, `_tengah-f14`, `_akhir-f29`) + `_shot-list.json` + `_shot-list.csv`, progress “Shot 2/2” |
 | 2026-09-08 | F5-07 verifikasi frame dan kegagalan | **Selesai** | `tests/export-browser.mjs` (didaftarkan di `npm run test:browser`, suite ke-11). Kesetaraan preview↔ekspor diukur sebagai rata-rata selisih kanal RGB pada 48×27 piksel antara frame hasil **decode** dan render preview pada waktu yang sama: **0,534 / 0,642 / 0,667** dari 255 untuk frame awal/tengah/akhir (ambang uji 3). Objek tersembunyi: referensi “aktor tampil” vs “aktor disembunyikan” berbeda 6,27 (membuktikan aktor memang digambar), dan ekspor dengan aktor tersembunyi cocok dengan referensi tersembunyi (0,7) sekaligus jauh dari referensi tampil. Kegagalan yang diuji: codec tak dikenal → `UnsupportedCodecError` tanpa berkas; dimensi ganjil 1281×721 ditolak **sebelum** `configure`; `codecId` tak dikenal → job gagal, `job.result === null`; cancel pada frame 12 → `ExportCancelled`, status `cancelled`, tanpa Blob, encoder + muxer dilepas; shot tanpa kamera → tidak dapat dicentang dan dialog berkata “Tidak ada shot yang memiliki kamera”; rentang > durasi di-clamp dengan pesan “dipotong ke frame 299”, rentang terbalik ditolak “kosong” dan tombol Mulai dimatikan |
 | 2026-09-08 | Perubahan pada uji lama karena dialog ekspor | Dicatat, bukan dilonggarkan | `tests/browser-smoke.mjs` dan `tests/walk-doors-delete.mjs` dahulu mengeklik `#export` lalu langsung menunggu unduhan. Sejak EX-01 tombol itu **membuka dialog**, jadi keduanya kini menunggu `#export-dialog` terbuka, menunggu daftar codec terisi, lalu mengeklik `#export-start`. Asersi intinya tidak diubah: unduhan video `.webm` tetap wajib terjadi. `#export` tetap dinonaktifkan saat tidak ada kamera, sehingga asersi `walk-doors-delete` dan `shot-timeline-browser` tentang itu tetap berlaku apa adanya |
+| 2026-09-08 | R2 · pengukuran ulang performa pasca schema v3 | Selesai | Risiko #1 `docs/handoff/phase4b-report.md` ditutup: `npm run test:perf` dijalankan **3× berturut** dan hasilnya diisi ke `docs/PERF-BASELINE.md` §6 kolom **“Setelah v3”** + sebaran §6.1. Tidak ada metrik yang melewati target PRD, jadi tidak ada bottleneck terukur yang dioptimalkan. Drag p95 11,6 → **12,5 ms** (<100), keyboard 21,1 → 22,8, scrub 18,4 → 19,0, pindah scene 44,4 → 45,1; playback 120 fps, frame-time p95 9,3 → **10,0 ms** (≤33,3), dropped 1 dari ±7 200; buka proyek 333 → **324 ms** (≤2 s); dashboard 102 kartu tetap **0** transaksi store `documents`; 20 siklus rebuild `geometries` 264 → 262 (tanpa tren naik). Dua angka yang bergerak paling jauh dijelaskan, bukan diabaikan: buka dokumen 5 MB 317 → **554 ms** karena fixture 5 MB berformat v2 sehingga setiap pembukaan menjalankan `migrateV2ToV3` atas 165 scene (biaya satu kali per dokumen, tetap 3,6× lebih cepat dari target — `docs/PERF-BASELINE.md` §6.2), dan `geometries`/`programs` 194/7 → 264/11 karena scene demo v3 memang berisi 15 prop ber-ID + dinding modular (§6.3) |
+| 2026-09-08 | R2 · suite gate `tests/gate-r2-browser.mjs` | Selesai | Suite ke-12, terdaftar pada `npm run test:browser`. Lima bagian yang **mencoba merusak**, bukan membuktikan: (1) mismatch preview↔ekspor pada 5 kombinasi yang belum dicakup Fase 5 — 16:9 / 9:16 / 2.39:1, 24 dan 30 fps, burn-in aktif, aktor tersembunyi, dengan prop dan dinding modular v3 di dalam frame; 15 titik uji menyimpang 0,358–0,587 pada skala 0–255 (ambang 3), plus pengaman `refSpread > 0,2` supaya “tiga frame kosong yang identik” tidak lolos sebagai “cocok”, plus pemeriksaan bahwa canvas POV preview mengikuti aspect shot (CA-01 “preview menunjukkan crop ekspor”) dan bahwa mengubah fps tidak menggeser satu pun keyframe; (2) lock bypass lewat geser massal / tempel / hapus massal / drag penanda timeline, dengan seleksi yang memuat aktor terkunci **dan** aktor bebas sekaligus — aktor bebas tetap bergeser (bukti operasinya berjalan), aktor terkunci tidak berubah satu byte pun; lalu jalur yang sama untuk prop dan dinding modular; (3) isolasi shot A/B melewati 6 undo + 6 redo, reload penuh, dan penghapusan shot B; (4) reload **di tengah job ekspor** tanpa menunggu status tersimpan — editan tidak hilang dan tidak ada `[data-export-host]` tertinggal; (5) kegagalan codec lewat **dialog** (bukan lapisan modul): pesan bernada error, tombol “Coba lagi” muncul, dialog dapat ditutup, tidak ada berkas terunduh |
+| 2026-09-08 | R2-01 · bug: session state basi setelah reload cepat | Diperbaiki | Ditemukan dari kegagalan **acak** `tests/editor-regression.mjs` saat suite dijalankan berurutan (tab yang dipulihkan tidak sesuai seleksi terakhir). Penyebab: `SessionTracker.record()` men-throttle **seluruh** field pada 1 detik, sementara transaksi IndexedDB yang dimulai pada `pagehide` tidak dijamin commit (temuan Fase 2 keputusan 5) — sehingga scene/shot/seleksi yang berubah <1 detik sebelum reload tidak pernah tertulis. Ini menyentuh acceptance criteria **PR-05** “scene aktif dipulihkan setelah reload”. Perbaikan (`src/session-state.js`): perpindahan **navigasi** (`sceneId`/`shotId`/`selectedId`) menembus throttle dan ditulis seketika, sementara playhead dan pose observer — dua field berfrekuensi tinggi yang menjadi alasan throttle itu ada — tetap digabung; `write()` juga membatalkan timer yang menggantung supaya state basi tidak menyusul. Uji regresi: unit “perpindahan scene/shot/seleksi menembus throttle session state” (`tests/repository.test.js`, jam palsu, membuktikan playhead **tetap** ter-throttle) |
+| 2026-09-08 | R2-02 · bug: objek set terkunci masih dapat diduplikasi | Diperbaiki | Ditemukan `tests/gate-r2-browser.mjs` §2: inspector prop/dinding terkunci menampilkan “Objek terkunci…” sementara `#duplicate-object` tetap aktif. Salinan lahir **tidak terkunci** dan hanya bergeser 0,5 m, jadi di viewport ia terbaca seperti objek terkunci yang berpindah — persis kebingungan yang hendak dicegah lock (ED-02); hapus sudah dinonaktifkan saat terkunci, duplikasi terlewat. Perbaikan (`src/main.js`): tombol dinonaktifkan saat `o.locked` **dan** `duplicateSetPiece()` menolak sumber terkunci dengan pesan, jadi penegakannya ada di lapisan command dan memaksa lewat DOM atau kait uji tetap ditolak. Uji regresi: jumlah objek set tidak bertambah setelah `duplicateProp()` dipanggil langsung |
+| 2026-09-08 | R2-03 · bug: build produksi mengeluarkan 404 | Diperbaiki | `npm run preview` menghasilkan `Failed to load resource: 404` pada setiap pemuatan karena `index.html` tidak punya `<link rel="icon">`. Bukan cacat fungsi, tetapi verifikasi `npm run preview` gate R1 dinyatakan “tanpa error halaman” — pernyataan itu benar hanya karena yang diperiksa `pageerror`, bukan console; console yang sudah berisi error membuat error lain lebih mudah terlewat saat pilot. Perbaikan: favicon SVG **inline** (data URI, tanpa berkas dan tanpa permintaan jaringan). Uji regresi: `tests/preview-check.mjs` menolak setiap respons HTTP ≥400 dan setiap pesan console bertipe `error` pada build produksi |
+| 2026-09-08 | R2 · `tests/preview-check.mjs` — verifikasi build produksi yang dapat diulang | Selesai | Sampai gate R2, `npm run preview` hanya diperiksa manual, dan pemeriksaan itu melewatkan R2-03. Berkas baru ini memuat build hasil `npm run build` lewat server preview (port 4174, **bukan** dev server) lalu menolak setiap `pageerror`, setiap console `error`, dan setiap respons HTTP ≥400 — termasuk permintaan yang dibuat browser sendiri. Ia juga menegaskan versi build terlihat dan sama di editor maupun dashboard. Sengaja **tidak** masuk `npm run test:browser` karena membutuhkan server yang berbeda; cara menjalankannya ada di bagian “Verifikasi dan definisi selesai per task” |
+| 2026-09-08 | P-01 · risiko murah: versi build terlihat di UI | Selesai | Menutup `docs/GATE-R1.md` C-05 dan `docs/ROLLOUT.md` §8 (“laporan bug pilot harus dapat ditelusuri ke build tertentu”). `vite.config.js` menyuntikkan versi `package.json` + hash commit pendek lewat `define` (`__APP_VERSION__`, `__APP_COMMIT__`, `__APP_BUILT_AT__`), dengan sufiks `+lokal` bila working tree kotor dan fallback `tanpa-git` bila `git` tidak tersedia — kegagalan `git` tidak boleh menggagalkan build. `src/build-info.js` membacanya dengan fallback aman sehingga modul tetap dapat diimpor dari `node --test`. Ditampilkan di **footer dashboard** dan pada panel “Panduan singkat” editor sebagai `v1.0.0 · <hash>`. Diuji `tests/preview-check.mjs` |
+| 2026-09-08 | P-02 · risiko murah: batch ekspor memicu banyak unduhan berturut-turut | Selesai | Menutup risiko `docs/handoff/phase5-report.md`. Batch 2 shot dengan storyboard + shot list menghasilkan 10 berkas; memanggil `download()` beberapa kali dalam satu tick membuat Chrome meminta izin “unduh beberapa berkas” dan dapat **menjatuhkan** unduhan berikutnya tanpa pesan. Tiga penanganan di `src/export/ui.js`: (1) seluruh unduhan diserialkan lewat satu rantai dengan jeda 300 ms sehingga tidak pernah ada dua unduhan dalam satu tick; (2) ringkasan dialog menyebut jumlah berkas yang akan diunduh **sebelum** ekspor dimulai beserta peringatan izin browser; (3) setiap berkas yang dihasilkan tetap tersedia sebagai tombol **“Unduh ulang”** di dialog (retensi 24 berkas / 250 MB, entri terlama dilepas dan dinyatakan), sehingga berkas yang diblokir browser tidak hilang bersama job-nya. Dialog baru dianggap selesai setelah rantai unduhan habis. Menggabungkan batch menjadi satu berkas ZIP per shot **tidak** dikerjakan — format biner baru tepat sebelum gate; dicatat sebagai tindak lanjut di `docs/GATE-R2.md` §7 |
+| 2026-09-08 | P-03 · risiko murah: Cues/SeekHead pada muxer WebM | Diperiksa, tidak perlu dikerjakan | **Cues sudah ada** sejak F5-04 (`src/export/webm-muxer.js`, satu CuePoint per cluster, dan 20 unit test memverifikasi setiap `CueClusterPosition` mendarat tepat pada ID cluster). Bukti kecukupannya: `ffprobe` membaca `duration=10.000000` dan seek `<video>` mendarat dalam 0,2 s dari target. **SeekHead** tetap belum ada dan sengaja tidak dikerjakan: manfaatnya hanya mempercepat pembukaan berkas besar pada sebagian pemutar, sementara menulisnya menuntut penghitungan offset dua-lintasan pada berkas yang sudah terbukti benar. Dicatat sebagai `docs/GATE-R2.md` C-04 |
+| 2026-09-08 | F6-09 gate R2 | **Lulus** | `docs/GATE-R2.md`: matriks bukti per acceptance criterion untuk SH-01, TL-01, TL-02, SC-01, CA-01, EX-01, EX-02, EX-03, **ditambah** verifikasi ulang ED-01…ED-05 dan PR-01…PR-07 (§3b) karena kriteria 1 menuntut gate R1 *tetap* lulus, bukan pernah lulus. Hasil eksekusi: `npm test` **177/177**, `npm run build` lulus, `npm run preview` lulus, `npm run test:browser` **12/12 suite**, `repository-browser` 3/3 dan `export-browser` 3/3 pada jalan berturut, `npm run test:perf` 3 jalan. Tiga bug ditemukan dan **seluruhnya diperbaiki** (R2-01, R2-02, R2-03); tidak ada bug kelas kehilangan data, lock bypass, export mismatch atau migrasi kritis yang terbuka. Dua belas catatan yang tidak menghalangi gate ada di §5 dan delapan batas kesimpulan di §6 — termasuk bahwa perilaku dengan pengguna nyata, perangkat kelas PRD, browser selain Chrome, dan format selain VP9/WebM **tidak** dibuktikan gate ini |
+| 2026-09-08 | F5-08 (bagian gate) | **Sebagian — gate lulus, pilot belum** | Bagian “jalankan gate R2” selesai (baris di atas). Bagian “pilot Fase 6” **belum dijalankan**: menuntut 5–8 pembuat film sungguhan selama dua minggu, tidak dapat diotomasi, dan dilacak sebagai F6-10/F6-11/F6-12 yang tetap `[ ]`. Karena itu **rilis output produksi belum boleh dinyatakan**. Yang dibutuhkan untuk memulai pilot ditulis di `docs/DECISIONS-NEEDED.md` §3, termasuk tiga pekerjaan teknis yang wajib selesai lebih dahulu: uji Edge, pengukuran perf pada perangkat kelas PRD, dan keputusan D-04 |
+| 2026-09-08 | F6-10/F6-11/F6-12, Fase 7, Fase 8 | **Tidak dicentang — sengaja** | `docs/DECISIONS-NEEDED.md` ditulis untuk pemilik produk: status D-01…D-07 (mana yang **diputuskan** dengan bukti implementasinya, mana yang berjalan sebagai **asumsi kerja** beserta biaya membalikkannya, mana yang **terbuka** beserta task yang ditahannya), apa yang dibutuhkan untuk menjalankan pilot F6-10/F6-11 dan mana yang hanya dapat disediakan pemilik produk, prasyarat F7-01 (auth, database metadata, object storage, model biaya, kebijakan akses, dan hosting aplikasi) sebagai opsi konkret dengan trade-off **tanpa memilih vendor**, serta cara memulai Fase 8 per item (sinyal yang harus muncul lebih dahulu → spike → apa yang sudah tersedia). Tidak ada satu pun task Fase 7/Fase 8 yang dikerjakan atau diasumsikan diam-diam |
+| 2026-09-08 | Konsolidasi dokumen akhir R2 | Selesai | `README.md` disegarkan ke kondisi akhir (alur proyek→scene→shot→ekspor, penyimpanan IndexedDB + backup, daftar perintah uji termasuk `test:browser`/`test:perf`/`preview-check`, dokumen terkait). `docs/AUDIT.md`: temuan yang sudah terselesaikan dipindahkan ke tabel selesai dan “Prioritas produk berikutnya” diisi ulang dengan yang benar-benar tersisa. `docs/PRD.md` bagian “Pembaruan implementasi berikutnya” menambahkan ringkasan R1/R2 yang terimplementasi **dan** apa yang belum diverifikasi pilot — **requirement tidak diubah**. `docs/ROLLOUT.md` §8 disegarkan (versi build sudah ada). `plan.md` dirapikan: tabel “Log pelaksanaan” yang sempat terpotong oleh bagian “Langkah berikutnya” disatukan kembali, dan bagian “Langkah berikutnya” dipindahkan ke akhir berkas |
+
+## Langkah berikutnya
+
+**Keadaan sekarang: gate R1 dan gate R2 keduanya LULUS.** Fase 0–5 selesai, Fase 6 selesai
+sampai F6-09. Bukti: `docs/GATE-R1.md`, `docs/GATE-R2.md`, dan laporan per fase di
+`docs/handoff/`.
+
+Yang tersisa **tidak dapat diselesaikan dengan menulis kode**, dan karena itu tidak ada
+task yang “tinggal dikerjakan” tanpa keputusan atau tanpa manusia:
+
+1. **Tiga pekerjaan teknis yang wajib selesai sebelum pilot** — ini satu-satunya yang dapat
+   dikerjakan sekarang juga:
+   - **Uji Edge** (PRD §9 menuntutnya; baris Edge di `docs/BROWSER-SUPPORT.md` masih
+     “Diperkirakan”, langkah manualnya ada di §5 berkas itu).
+   - **Ukur `npm run test:perf` pada perangkat kelas PRD** (8 GB RAM, GPU terintegrasi):
+     `PERF_LABEL=<perangkat> npm run test:perf`, lalu tambahkan barisnya di
+     `docs/PERF-BASELINE.md` §6. Seluruh angka yang ada berasal dari Apple M5 / 16 GiB —
+     batas atas optimistis, bukan bukti untuk perangkat sasaran.
+   - **Keputusan D-04** (MP4 wajib atau tidak) supaya peserta pilot tidak menemukan opsi
+     nonaktif tanpa jawaban.
+2. **Pilot F6-10 dan F6-11.** Protokolnya siap dipakai apa adanya di
+   `docs/PILOT-PROTOCOL.md`; yang belum ada adalah peserta, fasilitator, jendela dua
+   minggu, dan cara menyajikan build. Daftar lengkapnya di `docs/DECISIONS-NEEDED.md` §3.
+   **Jangan centang tanpa peserta sungguhan.**
+3. **F6-12** menunggu hasil pilot, dan bagian “deployment produksi”-nya juga menunggu
+   keputusan hosting (`docs/DECISIONS-NEEDED.md` §4.1).
+4. **Fase 7** ditahan **D-01** dan **D-07** serta prasyarat “hasil Fase 6”. Opsi konkret
+   untuk F7-01 dengan trade-off-nya, tanpa memilih vendor, ada di
+   `docs/DECISIONS-NEEDED.md` §4.
+5. **Fase 8** menunggu sinyal dari pilot. Untuk setiap item, sinyal apa yang harus muncul
+   lebih dahulu dan spike apa yang mendahului implementasi ada di
+   `docs/DECISIONS-NEEDED.md` §5. Tidak ada satu pun yang boleh dimulai karena “ada di
+   daftar”.
+
+**Tindak lanjut teknis yang boleh dikerjakan kapan saja tanpa keputusan produk** (semuanya
+tercatat sebagai catatan yang tidak menghalangi gate, dengan perkiraan biaya di
+`docs/GATE-R2.md` §7): bundel batch ekspor menjadi satu berkas per shot, SeekHead pada
+muxer WebM, streaming ekspor ke disk, encode+mux di Web Worker, marquee select keyframe,
+dan pemeriksaan kunci writer pada rename dari dashboard.
+
+**Yang tidak boleh dilakukan:** menyatakan rilis output produksi sebelum pilot dijalankan
+(F5-08 hanya lulus pada bagian gate-nya), dan mengklaim target PRD §11 tercapai
+berdasarkan uji otomatis — seluruhnya menuntut pengguna nyata.

@@ -290,3 +290,14 @@ button[hidden]{display:none!important}
 .export-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
 @media(max-width:850px){.export-dialog{right:8px;left:8px;width:auto;top:66px}}
 @media(max-width:540px){.export-dialog button{min-height:44px}.export-dialog select,.export-dialog input[type="number"]{min-height:44px}}
+
+/* Gate R2 — identitas build yang terlihat (docs/ROLLOUT.md §8, GATE-R1 C-05). */
+.dash-footer{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;margin:18px 0 6px;padding-top:12px;border-top:1px solid var(--line);font-size:10px;color:var(--muted)}
+.build-badge{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;letter-spacing:.02em;color:var(--muted);background:var(--chip,#eceade);border:1px solid var(--line);border-radius:999px;padding:3px 9px;white-space:nowrap}
+.help-build{font-size:10px;color:var(--muted);margin:10px 0 0}
+.export-files{margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
+.export-files[hidden]{display:none}
+.export-files ul{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:132px;overflow:auto}
+.export-files li{margin:0}
+.export-files button{width:100%;justify-content:flex-start;font-size:10px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:540px){.export-files button{min-height:44px}}

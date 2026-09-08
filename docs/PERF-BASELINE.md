@@ -227,20 +227,21 @@ dibuang, fixture `tests/fixtures/load/load-20a-10r-500k.json`.
 | Jalan | Tanggal | Commit | Keterangan |
 |---|---|---|---|
 | **Baseline** | 2026-09-08 | `549b7f0` + perubahan kerja F6 belum ada | sebelum optimasi apa pun |
-| **Hasil** | 2026-09-08 | `549b7f0` + seluruh perubahan Fase 6 (F6-02…F6-07) | sesudah optimasi §8 |
+| **Hasil** | 2026-09-08 | `549b7f0` + seluruh perubahan Fase 6 (F6-02…F6-07) | sesudah optimasi §8; schema v2 |
+| **Setelah v3** | 2026-09-08 | `c07e0f0` + perubahan gate R2 | **pengukuran ulang wajib** yang diminta risiko #1 `docs/handoff/phase4b-report.md`: schema v3 menggandakan lane timeline (posisi + orientasi per aktor) dan menaikkan scene demo dari 3 menjadi 18 objek set. **3 jalan berturut**, angka di bawah adalah median ketiganya; sebaran antar-jalan ditulis di §6.1 |
 
 ### F6-02 — interaksi dan playback
 
-| Metrik | Perangkat / mode | Baseline | Target (PRD) | Hasil | Status |
-|---|---|---|---|---|---|
-| p95 input → viewport, drag aktor | M5/16GiB, headed | **49,1 ms** (p50 11,0; maks 66,0; n=360) | <100 ms | **11,6 ms** (p50 10,4; maks 29,2; n=201) | tercapai |
-| p95 input → viewport, nudge keyboard | M5/16GiB, headed | **22,3 ms** (p50 13,1; maks 38,6; n=219) | <100 ms | **21,1 ms** (p50 14,2; maks 25,6; n=200) | tercapai |
-| p95 input → viewport, scrub playhead | M5/16GiB, headed | **17,4 ms** (p50 16,6; maks 20,8; n=200) | <100 ms | **18,4 ms** (p50 16,7; maks 21,4; n=200) | tercapai |
-| p95 input → viewport, pindah scene | M5/16GiB, headed | **53,5 ms** (p50 19,0; maks 83,3; n=40) | <100 ms | **44,4 ms** (p50 16,9; maks 50,2; n=40) | tercapai |
-| fps rata-rata, playback 60 s | M5/16GiB, headed | 119,43 | ≥30 fps | **119,99** | tercapai |
-| frame-time p95, playback 60 s | M5/16GiB, headed | 9,2 ms | ≤33,3 ms | **9,3 ms** | tercapai |
-| frame-time maksimum, playback 60 s | M5/16GiB, headed | **307,4 ms** | dilaporkan | **16,6 ms** | membaik 18× |
-| dropped frames, playback 60 s | M5/16GiB, headed | **38** dari ±7 200 (0,52%), long task 0 | dilaporkan | **1** (0,01%), long task 0 | membaik |
+| Metrik | Perangkat / mode | Baseline | Target (PRD) | Hasil | **Setelah v3** | Status |
+|---|---|---|---|---|---|---|
+| p95 input → viewport, drag aktor | M5/16GiB, headed | **49,1 ms** (p50 11,0; maks 66,0; n=360) | <100 ms | **11,6 ms** (p50 10,4; maks 29,2; n=201) | **12,5 ms** (p50 10,9; maks 21,0; n=201; sebaran 12,5–12,6) | tercapai |
+| p95 input → viewport, nudge keyboard | M5/16GiB, headed | **22,3 ms** (p50 13,1; maks 38,6; n=219) | <100 ms | **21,1 ms** (p50 14,2; maks 25,6; n=200) | **22,8 ms** (p50 17,9; maks 33,4; n=200; sebaran 21,9–23,2) | tercapai |
+| p95 input → viewport, scrub playhead | M5/16GiB, headed | **17,4 ms** (p50 16,6; maks 20,8; n=200) | <100 ms | **18,4 ms** (p50 16,7; maks 21,4; n=200) | **19,0 ms** (p50 16,6; maks 23,7; n=200; sebaran 18,9–19,4) | tercapai |
+| p95 input → viewport, pindah scene | M5/16GiB, headed | **53,5 ms** (p50 19,0; maks 83,3; n=40) | <100 ms | **44,4 ms** (p50 16,9; maks 50,2; n=40) | **45,1 ms** (p50 18,0; maks 60,9; n=40; sebaran 45,0–47,4) | tercapai |
+| fps rata-rata, playback 60 s | M5/16GiB, headed | 119,43 | ≥30 fps | **119,99** | **120,01** (sebaran 119,98–120,01) | tercapai |
+| frame-time p95, playback 60 s | M5/16GiB, headed | 9,2 ms | ≤33,3 ms | **9,3 ms** | **10,0 ms** (sebaran 9,9–10,0) | tercapai |
+| frame-time maksimum, playback 60 s | M5/16GiB, headed | **307,4 ms** | dilaporkan | **16,6 ms** | **17,0 ms** (sebaran 16,4–17,4) | dilaporkan |
+| dropped frames, playback 60 s | M5/16GiB, headed | **38** dari ±7 200 (0,52%), long task 0 | dilaporkan | **1** (0,01%), long task 0 | **1** (0,01%), long task 0, ketiga jalan | dilaporkan |
 
 **Catatan metode yang wajib dibaca bersama angka di atas.** Latensi diukur dengan pola
 dua `requestAnimationFrame` (§4.1): rAF pertama adalah frame yang merender akibat input,
@@ -256,16 +257,68 @@ rendah bisa berarti "tidak terjadi apa-apa", bukan "cepat".
 
 ### F6-03 — buka proyek, dashboard dan memori
 
-| Metrik | Perangkat / mode | Baseline | Target (PRD) | Hasil | Status |
-|---|---|---|---|---|---|
-| p95 buka proyek — fixture beban (97 088 B) | M5/16GiB, headed | 426,1 ms (p50 285,9; n=20) | ≤2 detik | **333,1 ms** (p50 266,5; n=20) | tercapai |
-| p95 buka proyek — **metadata 5 023 714 B / 165 scene** | M5/16GiB, headed | tidak diukur pada baseline | ≤2 detik | **317,1 ms** (p50 246,9; n=5) | tercapai |
-| Waktu render dashboard 100 proyek (102 kartu) | M5/16GiB, headed | 116 ms | dilaporkan | **176 ms** | dilaporkan |
-| Transaksi store `documents` saat dashboard tampil | M5/16GiB, headed | **0** | 0 | **0** (`projects` 2, `assets` 26) | tercapai |
-| `renderer.info.memory.geometries`, 20 siklus rebuild | M5/16GiB, headed | 532 → 530 | tanpa tren naik | **194 → 194** | tercapai |
-| `renderer.info.memory.textures`, 20 siklus rebuild | M5/16GiB, headed | 1 → 1 | tanpa tren naik | **1 → 1** | tercapai |
-| `renderer.info.programs`, 20 siklus rebuild | M5/16GiB, headed | 11 → 11 | tanpa tren naik | **7 → 7** | tercapai |
-| p95 buka proyek diulang 20× (proxy kebocoran memori) | M5/16GiB, headed | tidak ada tren naik | tanpa tren naik | tidak ada tren naik | tercapai |
+| Metrik | Perangkat / mode | Baseline | Target (PRD) | Hasil | **Setelah v3** | Status |
+|---|---|---|---|---|---|---|
+| p95 buka proyek — fixture beban (97 088 B) | M5/16GiB, headed | 426,1 ms (p50 285,9; n=20) | ≤2 detik | **333,1 ms** (p50 266,5; n=20) | **323,6 ms** (p50 281,9; n=20; sebaran 322,8–336,6) | tercapai |
+| p95 buka proyek — **metadata 5 023 714 B / 165 scene** | M5/16GiB, headed | tidak diukur pada baseline | ≤2 detik | **317,1 ms** (p50 246,9; n=5) | **554,2 ms** (p50 376,9; n=5; sebaran 534,2–627,8) — lihat §6.2 | tercapai |
+| Waktu render dashboard 100 proyek (102 kartu) | M5/16GiB, headed | 116 ms | dilaporkan | **176 ms** | **218 ms** (sebaran 174–232) | dilaporkan |
+| Transaksi store `documents` saat dashboard tampil | M5/16GiB, headed | **0** | 0 | **0** (`projects` 2, `assets` 26) | **0** (`projects` 2, `assets` 26), ketiga jalan | tercapai |
+| `renderer.info.memory.geometries`, 20 siklus rebuild | M5/16GiB, headed | 532 → 530 | tanpa tren naik | **194 → 194** | **264 → 262** — lihat §6.3 | tercapai |
+| `renderer.info.memory.textures`, 20 siklus rebuild | M5/16GiB, headed | 1 → 1 | tanpa tren naik | **1 → 1** | **1 → 1** | tercapai |
+| `renderer.info.programs`, 20 siklus rebuild | M5/16GiB, headed | 11 → 11 | tanpa tren naik | **7 → 7** | **11 → 11** — lihat §6.3 | tercapai |
+| p95 buka proyek diulang 20× (proxy kebocoran memori) | M5/16GiB, headed | tidak ada tren naik | tanpa tren naik | tidak ada tren naik | tidak ada tren naik | tercapai |
+
+### 6.1 Sebaran antar-jalan (schema v3)
+
+`docs/PERF-BASELINE.md` §2 meminta 3 jalan per skenario; gate R1 baru menjalankan 1 jalan
+per label. Pada pengukuran ulang v3 ketiga jalan dijalankan berurutan pada sesi yang sama
+(`PERF_LABEL=… npm run test:perf`, 8 September 2026). Sebaran p95 antar-jalan:
+
+| Metrik | Jalan 1 | Jalan 2 | Jalan 3 | Rentang |
+|---|---|---|---|---|
+| drag p95 | 12,5 ms | 12,6 ms | 12,5 ms | 0,1 ms |
+| keyboard p95 | 23,2 ms | 22,8 ms | 21,9 ms | 1,3 ms |
+| scrub p95 | 18,9 ms | 19,0 ms | 19,4 ms | 0,5 ms |
+| pindah scene p95 | 47,4 ms | 45,0 ms | 45,1 ms | 2,4 ms |
+| frame-time p95 | 9,9 ms | 10,0 ms | 10,0 ms | 0,1 ms |
+| buka proyek p95 | 336,6 ms | 323,6 ms | 322,8 ms | 13,8 ms |
+| buka 5 MB p95 | 534,2 ms | 627,8 ms | 554,2 ms | 93,6 ms |
+
+Interaksi dan playback stabil (variasi ≤2,4 ms). Yang berayun adalah **buka dokumen 5 MB**
+(±94 ms, ≈17%); penyebabnya dijelaskan di §6.2. Semuanya tetap jauh di bawah target.
+
+### 6.2 Mengapa "buka 5 MB" naik dari 317 ms ke ±550 ms
+
+Kenaikan ini **terukur dan dapat dijelaskan**, bukan regresi yang tidak diketahui asalnya:
+fixture 5 MB dibangun dari `tests/fixtures/load/load-20a-10r-500k.json`, yang berformat
+**schema v2**. Sejak Fase 4b setiap dokumen tersimpan dilewatkan `openProjectData`, jadi
+membuka fixture itu sekarang berarti menjalankan `migrateV2ToV3` atas **165 scene**
+(memecah setiap track `pose` aktor menjadi `position` + `rotation`) lalu menyimpan ulang
+hasil upgrade satu kali (`__upgraded` di `src/bootstrap.js`).
+
+Konsekuensi yang perlu dibaca bersama angkanya:
+
+- Biaya ini **satu kali per dokumen** pada pemakaian nyata — setelah upgrade tersimpan,
+  pembukaan berikutnya tidak lagi memigrasi. Harness sengaja mengukur kasus terburuk
+  (dokumen v2 yang belum pernah dibuka build v3).
+- Angka **554 ms tetap 3,6× lebih cepat** daripada target PRD ≤2 detik, jadi tidak ada
+  bottleneck yang perlu dioptimalkan; mengoptimalkan jalur migrasi sekali pakai akan
+  menukar risiko korupsi data dengan waktu yang tidak dikeluhkan siapa pun.
+- Bila fixture beban kelak ditulis ulang sebagai v3, angka ini akan turun kembali ke
+  kisaran gate R1 — dan pada saat itu kasus "dokumen v2 lama" berhenti terukur. Karena
+  itu fixture sengaja **tidak** diubah.
+
+### 6.3 Mengapa penghitung GPU naik dari 194/7 ke 264/11
+
+Bukan kebocoran: yang diukur `geometries` adalah **jumlah pada satu titik waktu**, dan
+kriteria lulusnya adalah "tidak ada tren naik setelah 20 siklus rebuild". Angka
+264 → 262 dan 11 → 11 memenuhi kriteria itu persis seperti 194 → 194 pada gate R1.
+
+Kenaikan angka dasarnya berasal dari isi scene demo yang memang bertambah pada schema v3:
+dekorasi yang dahulu digambar dari indeks ruangan menjadi **15 prop ber-ID** ditambah
+objek dinding modular (`docs/handoff/phase4b-report.md`), dan setiap bentuk prop baru
+membawa material/shader-nya sendiri (`programs` 7 → 11). Angka yang sama (264 → 262)
+sudah tercatat pada pengukuran Fase 4.
 
 **Cara "0 dokumen dibaca" dibuktikan.** `IDBDatabase.prototype.transaction` di-instrumentasi
 lewat `addInitScript` **sebelum** skrip aplikasi mana pun berjalan, lalu setiap nama object
@@ -363,9 +416,10 @@ saja di antara render.
 - **Perangkat lebih kuat daripada kelas referensi PRD** (lihat §1) — hasil bersifat
   optimistis. Ini keterbatasan terpenting dari seluruh dokumen ini: target PRD dinyatakan
   untuk "laptop 8 GB RAM, GPU terintegrasi", dan angka §6 **tidak** membuktikan target
-  terpenuhi di sana. Margin terhadap target memang besar (drag 11,6 ms vs 100 ms → 8,6×;
-  buka proyek 333 ms vs 2 000 ms → 6×), tetapi margin bukan pengukuran. Ulangi §5 pada
-  perangkat kelas PRD sebelum pilot dan tambahkan barisnya di §6.
+  terpenuhi di sana. Margin terhadap target memang besar (setelah v3: drag 12,5 ms vs
+  100 ms → 8×; buka proyek 324 ms vs 2 000 ms → 6,2×; buka dokumen 5 MB 554 ms vs
+  2 000 ms → 3,6×), tetapi margin bukan pengukuran. Ulangi §5 pada perangkat kelas PRD
+  sebelum pilot dan tambahkan barisnya di §6.
 - Fixture beban memakai satu scene dan satu shot. Beban multi-scene/multi-shot
   (perpindahan shot berulang) belum punya fixture khusus; tambahkan bila F6-02 menemukan
   bottleneck di jalur `activate()`.
@@ -375,4 +429,10 @@ saja di antara render.
   belum tentu sama dengan proyek nyata berukuran sama (mis. satu scene dengan ribuan
   keyframe).
 - **Penanda keyframe timeline belum diuji beban ekstrem.** Fixture memakai ≤27 keyframe
-  per aktor; `LIMITS.keys` mengizinkan 2 400.
+  per aktor; `LIMITS.keys` mengizinkan 2 400. Pada schema v3 jumlah **lane** yang dirender
+  sudah dua kali lipat (posisi + orientasi per aktor) dan itu ikut terukur pada jalan
+  "Setelah v3" (drag p95 11,6 → 12,5 ms), tetapi jumlah keyframe per lane tidak diperbesar.
+- **Ekspor deterministik tidak masuk harness ini.** Waktu render+encode diukur terpisah di
+  `tests/export-browser.mjs` dan dicatat di `docs/SPIKE-ENCODER.md` / laporan Fase 5
+  (300 frame 720p ≈ 865 ms). PRD §9 tidak menetapkan target waktu ekspor, jadi angkanya
+  dilaporkan, bukan dijadikan kriteria lulus.

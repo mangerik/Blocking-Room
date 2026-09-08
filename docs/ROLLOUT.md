@@ -11,21 +11,27 @@ menurunkan kemampuan, tidak pernah menghilangkan karya pengguna.
 |---|---|---|
 | `npm run dev -- --port 5174 --strictPort` | pengembangan dan seluruh suite browser | dipakai setiap hari |
 | `npm run build` | build produksi ke `dist/` | lulus |
-| `npm run preview -- --port 4174 --strictPort` | menyajikan `dist/` untuk verifikasi pra-rilis | **diverifikasi 8 Sep 2026**: editor terbuka (3 aktor), tombol metrik ada, dashboard menampilkan kartu, tidak ada error halaman |
-| `npm test` | 112 unit test | lulus |
-| `npm run test:browser` | 8 suite Playwright (Chrome) | lulus |
-| `npm run test:perf` | harness performa F6-02/F6-03 | lihat `docs/PERF-BASELINE.md` |
+| `npm run preview -- --port 4174 --strictPort` | menyajikan `dist/` untuk verifikasi pra-rilis | **diverifikasi 8 Sep 2026** (gate R2) |
+| `node tests/preview-check.mjs` | verifikasi otomatis atas build produksi yang sedang di-preview | lulus — menolak setiap `pageerror`, console `error` **dan** respons HTTP ≥400; memastikan versi build terlihat |
+| `npm test` | 177 unit test | lulus |
+| `npm run test:browser` | 12 suite Playwright (Chrome) | lulus |
+| `npm run test:perf` | harness performa F6-02/F6-03 | lihat `docs/PERF-BASELINE.md` §6 (kolom “Setelah v3”) |
 
 Aplikasi ini **statis sepenuhnya**: `dist/` berisi HTML/JS/CSS tanpa backend, tanpa
 variabel lingkungan, tanpa kunci API. Rilis berarti menyalin `dist/` ke hosting statis
 mana pun; rollback berarti menyalin `dist/` versi sebelumnya. Tidak ada migrasi server.
 
-Verifikasi pra-rilis minimum pada hasil `npm run preview`:
+Verifikasi pra-rilis minimum pada hasil `npm run preview` — jalankan
+`node tests/preview-check.mjs` lebih dahulu (ia menutup langkah 1, 2 dan identitas build
+secara otomatis), lalu periksa manual sisanya:
 
-1. Buka `/` — editor muncul, viewport menggambar, status "Tersimpan lokal".
-2. Buka `/#/` — dashboard menampilkan proyek.
-3. Buat proyek → tambah aktor → reload → perubahan bertahan.
-4. Ekspor paket lalu impor kembali — proyek setara.
+1. Buka `/` — editor muncul, viewport menggambar, status "Tersimpan lokal". *(otomatis)*
+2. Buka `/#/` — dashboard menampilkan proyek. *(otomatis)*
+3. Versi build terlihat di footer dashboard dan panduan editor, dan **cocok dengan commit
+   yang dirilis**. *(otomatis)*
+4. Buat proyek → tambah aktor → reload → perubahan bertahan.
+5. Ekspor paket lalu impor kembali — proyek setara.
+6. Ekspor satu shot ke video — berkas terunduh dan dapat diputar.
 
 ## 2. Feature flag dashboard (pilot)
 
@@ -201,9 +207,21 @@ Ditulis di sini supaya tidak terlewat saat F6-12 memutuskan deployment:
 
 - **Belum ada target hosting yang ditetapkan.** PRD §15 menyebut "deployment produksi
   hanya ketika scope/lingkungan rilis sudah ditetapkan" (F6-12).
-- **Belum ada versi build yang terlihat di UI.** Saat peserta melaporkan bug, tidak ada
-  cara memastikan build mana yang dipakai. Perbaikan murah: tampilkan hash commit di
-  panduan atau panel metrik. **Belum dikerjakan.**
+- ~~**Belum ada versi build yang terlihat di UI.**~~ **Selesai pada gate R2.**
+  `vite.config.js` menyuntikkan versi `package.json` dan hash commit pendek lewat `define`
+  (`__APP_VERSION__`, `__APP_COMMIT__`, `__APP_BUILT_AT__`); `src/build-info.js`
+  membacanya dengan fallback aman. Ditampilkan sebagai `v1.0.0 · <hash>` di **footer
+  dashboard** dan pada panel “Panduan singkat” editor, dengan `title=` yang memuat waktu
+  build. Hash diberi sufiks `+lokal` bila working tree kotor, sehingga build dari
+  perubahan yang belum di-commit tidak dapat disalahartikan sebagai commit itu sendiri.
+  Diverifikasi otomatis oleh `tests/preview-check.mjs`. **Minta angka ini pada setiap
+  laporan bug pilot** — `docs/PILOT-PROTOCOL.md` §2 langkah 1 sudah meminta fasilitator
+  mencatat hash build.
 - **Belum ada uji Edge**, padahal PRD §9 menuntutnya (lihat `docs/BROWSER-SUPPORT.md`).
 - **Belum ada pengukuran pada perangkat kelas PRD** (8 GB, GPU terintegrasi).
-- **Belum ada pilot manusia** (F6-10…F6-12). Protokolnya siap di `docs/PILOT-PROTOCOL.md`.
+- **Belum ada pilot manusia** (F6-10…F6-12). Protokolnya siap di `docs/PILOT-PROTOCOL.md`;
+  apa yang dibutuhkan untuk memulainya (peserta, fasilitator, jendela dua minggu, cara
+  menyajikan build) ada di `docs/DECISIONS-NEEDED.md` §3.
+- **Belum ada keputusan D-04** (MP4 wajib atau tidak). Ekspor WebM/VP9 sudah lulus gate R2;
+  MP4 tampil sebagai opsi **nonaktif** berlabel alasannya. Putuskan sebelum pilot supaya
+  peserta tidak menemukan opsi mati tanpa jawaban — `docs/DECISIONS-NEEDED.md` §2 D-04.

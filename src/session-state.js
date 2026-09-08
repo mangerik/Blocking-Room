@@ -20,6 +20,7 @@ export class SessionTracker {
     this.pending = null;
     this.timer = null;
     this.inflight = null;
+    this.lastNavigation = null;
   }
 
   setEnabled(enabled) {
@@ -27,12 +28,24 @@ export class SessionTracker {
     if (!enabled) {clearTimeout(this.timer); this.timer = null; this.pending = null;}
   }
 
-  /** Mencatat state terbaru; penulisan sebenarnya paling cepat setiap `throttle` ms. */
+  /**
+   * Mencatat state terbaru; penulisan sebenarnya paling cepat setiap `throttle` ms.
+   *
+   * Pengecualian yang disengaja: perpindahan **navigasi** (scene, shot atau seleksi) ditulis
+   * seketika. Yang dilindungi throttle adalah field berfrekuensi tinggi — playhead dan pose
+   * observer — bukan tiga field yang menentukan "editor terbuka di mana". Tanpa pengecualian
+   * ini, pindah scene lalu reload dalam <1 detik memulihkan scene yang salah (PRD PR-05
+   * "scene aktif dipulihkan setelah reload"), karena transaksi IndexedDB yang dimulai pada
+   * `pagehide` tidak dijamin commit (lihat `docs/handoff/phase2-report.md` keputusan 5).
+   */
   record(state) {
     if (!this.enabled || !this.repository || !state?.projectId) return;
     this.pending = {...state};
+    const navigation = `${state.projectId}|${state.sceneId}|${state.shotId}|${state.selectedId ?? ''}`;
+    const navigated = this.lastNavigation !== null && this.lastNavigation !== navigation;
+    this.lastNavigation = navigation;
     const elapsed = this.now() - this.lastWriteAt;
-    if (elapsed >= this.throttle) {this.write(); return;}
+    if (navigated || elapsed >= this.throttle) {this.write(); return;}
     if (!this.timer) this.timer = setTimeout(() => {this.timer = null; this.write();}, this.throttle - elapsed);
   }
 
@@ -40,6 +53,8 @@ export class SessionTracker {
     const state = this.pending;
     this.pending = null;
     if (!state) return this.inflight ?? Promise.resolve();
+    clearTimeout(this.timer);
+    this.timer = null;
     this.lastWriteAt = this.now();
     // Kegagalan session state tidak boleh menggagalkan apa pun: ini hanya kenyamanan.
     this.inflight = this.repository.putSession(state).catch(() => {});

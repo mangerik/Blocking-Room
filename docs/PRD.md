@@ -2,7 +2,9 @@
 
 Versi 1.1 · 7 September 2026 · Status: draft implementasi untuk rilis berikutnya
 
-Dokumen ini membedakan fitur yang sudah berjalan, kebutuhan rilis berikutnya, dan eksplorasi masa depan. Sistem banyak proyek belum diimplementasikan pada revisi ini. Prioritas dan target di bawah adalah usulan untuk divalidasi bersama pemilik produk; bukan klaim hasil pengukuran atau komitmen tanggal.
+Dokumen ini membedakan fitur yang sudah berjalan, kebutuhan rilis berikutnya, dan eksplorasi masa depan. Prioritas dan target di bawah adalah usulan untuk divalidasi bersama pemilik produk; bukan klaim hasil pengukuran atau komitmen tanggal.
+
+> **Catatan status (8 September 2026), bukan perubahan requirement.** Kalimat asli revisi ini berbunyi “sistem banyak proyek belum diimplementasikan pada revisi ini”. Sejak itu R1 **dan** R2 sudah terimplementasi dan lulus gate: banyak proyek, banyak scene, banyak shot, timeline per properti, props/dinding modular, dan ekspor deterministik. Requirement pada §8 dan target pada §9/§11 **tidak diubah**; status implementasinya dicatat terpisah pada bagian “Pembaruan implementasi berikutnya” di akhir dokumen, beserta daftar eksplisit apa yang **belum** diverifikasi karena menunggu pilot.
 
 ## 1. Ringkasan
 
@@ -299,4 +301,56 @@ Prospek produk yang paling masuk akal berdasarkan workflow ini adalah alat previ
 
 ## Pembaruan implementasi berikutnya
 
-Langkah kaki prosedural deterministik, penghapusan semua jenis item termasuk slot kamera, pintu terbuka dengan ukuran/posisi yang dapat diedit, dan peringatan lintasan dinding telah diimplementasikan. Collision fisik, auto-routing, daun pintu beranimasi, serta banyak proyek tetap menjadi kebutuhan masa depan.
+*Bagian ini mencatat status implementasi. **Requirement di atas tidak diubah** — tidak ada acceptance criterion yang dilonggarkan, ditambah, atau dihapus.*
+
+### R0.1 (sebelum R1)
+
+Langkah kaki prosedural deterministik, penghapusan semua jenis item termasuk slot kamera, pintu terbuka dengan ukuran/posisi yang dapat diedit, dan peringatan lintasan dinding telah diimplementasikan. Collision fisik, auto-routing dan daun pintu beranimasi tetap menjadi kebutuhan masa depan.
+
+### R1 — terimplementasi, gate lulus 8 September 2026
+
+Bukti per acceptance criterion: [GATE-R1.md](GATE-R1.md) §2.
+
+| Req | Status | Ringkas |
+|---|---|---|
+| PR-01 Dashboard proyek | Terpenuhi | Daftar kartu dengan thumbnail, jumlah scene dan `updatedAt`; buat/buka/rename/duplikasi; pencarian dan dua urutan; empty/loading/error state. Menampilkan 100 proyek membuka **0** transaksi store `documents` |
+| PR-02 Isolasi proyek | Terpenuhi | UUID per proyek; duplikasi memetakan ulang seluruh ID sambil menjaga target kamera dan `objectId` track; diuji dengan dua proyek berjudul **sama** |
+| PR-03 Autosave | Terpenuhi | Transaksi IndexedDB atomik; status “tersimpan” hanya setelah commit; kegagalan mempertahankan dokumen di memori dan menawarkan unduh cadangan. **Terukur:** p95 260 ms setelah gestur (target ≤1 detik) |
+| PR-04 Recovery & trash | Terpenuhi | ≥10 snapshot per proyek (batas 20), pemulihan = satu langkah undo, tempat sampah 30 hari, hapus permanen berkonfirmasi |
+| PR-05 Banyak scene | Terpenuhi | Tambah/nama/duplikasi/urutkan/hapus scene; tiap scene memiliki set, aktor dan timeline sendiri; scene aktif pulih setelah reload (diperkuat perbaikan bug R2-01) |
+| PR-06 Migrasi & paket | Terpenuhi | v1 → satu proyek/scene/shot tanpa perubahan pose; paket berchecksum SHA-256 per bagian; roundtrip setara; input invalid tidak pernah menimpa; schema lebih baru tidak dibuka dan tidak ditimpa |
+| PR-07 Banyak tab | Terpenuhi | Satu writer per proyek (Web Locks + heartbeat); tab lain baca-saja dengan pilihan “Buka salinan”/“Ambil alih”; penolakan ditegakkan di lapisan command, bukan hanya di UI |
+
+### R2 — terimplementasi, gate lulus 8 September 2026
+
+Bukti per acceptance criterion: [GATE-R2.md](GATE-R2.md) §3. Dokumen naik ke `schemaVersion: 3` lewat **satu** migrasi copy-first.
+
+| Req | Status | Ringkas |
+|---|---|---|
+| SH-01 Shot list | Terpenuhi | Nama/nomor, kamera aktif, durasi, aspect ratio dan catatan per shot; reorder; duplikasi; perbandingan A/B. Isolasi shot bertahan melewati undo/redo penuh, reload dan penghapusan shot |
+| TL-01 Timeline lanjutan | Terpenuhi | Geser/multi-select/salin/tempel/hapus keyframe, snapping ke frame, zoom/pan, satu undo per operasi massal, aturan replace yang terlihat. Lock ditegakkan pada seluruh operasi massal |
+| TL-02 Track per properti | Terpenuhi | Track `position` dan `rotation` terpisah, interpolasi linear/hold/ease per track. Kesetaraan gerak lama dibuktikan terhadap golden Fase 0 pada toleransi **1e-9** |
+| SC-01 Props dan set | Terpenuhi | Box/meja/kursi/dekorasi sebagai entitas ber-ID, dinding modular `type: 'wall'`, pintu ruangan tetap seperti R0.1; transform/lock/hide/duplikasi memakai jalur command yang sama; snap grid opsional (default mati) |
+| CA-01 Kamera sinematik | Terpenuhi | Preset 18/35/85 mm, 16:9 / 9:16 / 2.39:1, safe area, keyframe focal, target lock vs manual aim. Preview memakai crop yang sama dengan ekspor — dibuktikan dengan membandingkan canvas POV dan ukuran berkas hasil decode |
+| EX-01 Export dialog | Terpenuhi | Pilih shot/rentang, resolusi, fps, dan codec yang **benar-benar tersedia** (dua daftar kapabilitas terpisah); progress, cancel, retry; nama berkas `proyek_scene_shot`; edit selama job berjalan tidak mengubah hasilnya |
+| EX-02 Ekspor deterministik | Terpenuhi | 10 detik × 30 fps = **tepat 300 frame**, durasi container 10,000000 detik (`ffprobe`); kesetaraan pose awal/tengah/akhir dan objek tersembunyi; fallback real-time berlabel jelas |
+| EX-03 Referensi produksi | Terpenuhi | Burn-in opsional (nama shot, timecode, lensa), PNG storyboard, shot list JSON + CSV; overlay editor tidak ikut render tanpa pilihan eksplisit |
+
+### NFR §9 — status
+
+Terpenuhi **pada perangkat referensi** dan diukur ulang setelah schema v3: p95 interaksi 12,5–45,1 ms (target <100 ms), playback frame-time p95 10,0 ms (target ≤33,3 ms), buka dokumen 5 MB p95 554 ms (target ≤2 detik), dashboard 100 proyek tanpa memuat scene, dan tidak ada tren naik pada penghitung GPU setelah 20 siklus. Angka lengkap dan definisi metriknya di [PERF-BASELINE.md](PERF-BASELINE.md).
+
+**Terpenuhi sebagian:** aksesibilitas (kontras, nama, fokus dan padanan keyboard lulus otomatis; pembaca layar, `prefers-reduced-motion` dan zoom 200% belum) dan kompatibilitas (hanya Chrome yang diuji; Edge belum, meskipun §9 menyebutnya).
+
+### Yang BELUM diverifikasi — memerlukan pilot
+
+Gate teknis tidak dapat menggantikan pengguna. Berikut yang tetap tidak terbukti sampai F6-10/F6-11 dijalankan, dan karena itu **tidak boleh dinyatakan tercapai**:
+
+- **Seluruh metrik §11**: keberhasilan tugas ≥80% tanpa bantuan, median waktu ke video pertama ≤10 menit, export success ≥95%, kembali mengedit dalam 7 hari ≥50%, kehilangan data tersimpan = 0. Yang ada sekarang hanyalah instrumentasi lokal yang siap menghitungnya, bukan hasilnya.
+- **Tujuan §3 poin 1** (“pengguna baru dapat membuat scene dua karakter, satu gerakan kamera dan video referensi dalam ≤10 menit pada uji tugas terarah”) — belum pernah diuji pada pengguna baru.
+- **Performa pada kelas perangkat §9** (laptop 8 GB, GPU terintegrasi).
+- **Browser selain Chrome**, termasuk Edge yang disebut §9.
+- **Kuota penyimpanan penuh pada perangkat nyata** — jalur `StorageQuotaError` baru diuji lewat kegagalan buatan.
+- **Aksesibilitas dengan pembaca layar dan pengguna sungguhan.**
+
+Protokol pilot siap dipakai apa adanya di [PILOT-PROTOCOL.md](PILOT-PROTOCOL.md), termasuk kriteria keputusan §14 yang ditetapkan **sebelum** pilot dimulai. Keputusan yang masih terbuka dan menahan fase berikutnya — termasuk D-04 (MP4) dan D-07 (cloud) — ada di [DECISIONS-NEEDED.md](DECISIONS-NEEDED.md). **Fase cloud (CL-01/CL-02) belum dikerjakan sama sekali** dan tetap bergantung pada keputusan tersebut.

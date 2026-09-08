@@ -10,7 +10,13 @@ Blocking Room turns a scene into a simple interactive 3D plan. Arrange geometric
 
 The interface is currently in Indonesian. This README uses English so the project is accessible to a wider open-source community; important product documentation remains available in Indonesian.
 
-> **Project status:** early functional prototype. It is useful for blocking experiments and reference exports, but it is not yet a production-ready multi-project or collaborative system.
+> **Project status:** feature-complete for R1 and R2, with both release gates passed
+> ([R1](docs/GATE-R1.md), [R2](docs/GATE-R2.md)). What remains before it can be called
+> production-ready is **not code**: a pilot with real filmmakers has not been run
+> ([docs/PILOT-PROTOCOL.md](docs/PILOT-PROTOCOL.md)), performance has only been measured on
+> one high-end machine, and only Chrome has been tested. Everything is local — there is no
+> account, no cloud, and no collaboration. Open decisions that block further phases are
+> listed in [docs/DECISIONS-NEEDED.md](docs/DECISIONS-NEEDED.md).
 
 ## Contents
 
@@ -115,8 +121,10 @@ The visual language deliberately stays simple. Geometric actors and lightweight 
 - Store a 320 × 180 scene thumbnail after relevant changes; a failed thumbnail never fails a document save.
 - Export and import a single-file project package (`.blockingroom.json`) with a manifest and SHA-256 checksums per section.
 - Import legacy version 1 JSON as a new project without touching the projects you already have.
-- Download and reopen a JSON project backup.
-- Export the camera view as a 1280 × 720 reference video using the browser's supported recording codec.
+- Download and reopen a JSON project backup, and download a v2 or v1 JSON copy for rolling back to an older build.
+- Render a deterministic reference video offline through WebCodecs — a 10-second shot at 30 fps contains exactly 300 frames — with a labelled real-time `MediaRecorder` fallback when WebCodecs is unavailable.
+- Queue several shots, add optional burn-in, PNG storyboard frames, and a JSON/CSV shot list.
+- Show the build version and short commit hash in the dashboard footer and the editor's quick guide, so a bug report can be traced to a specific build.
 
 ## Quick start
 
@@ -148,6 +156,25 @@ npm run preview
 The production files are generated in `dist/`. The directory is intentionally ignored by Git.
 
 ## Using the editor
+
+The workflow is **project → scene → shot → blocking → preview → reference video**, and each
+level owns different data:
+
+| Level | Owns | Where |
+|---|---|---|
+| **Project** | title, the whole document, revisions, thumbnail, trash state | Dashboard (`#/`) — create, open, rename, duplicate, export a package, delete |
+| **Scene** | actors, rooms, props, modular walls, director's note | Left panel, top — add, rename, duplicate, reorder, delete |
+| **Shot** | camera, motion tracks, duration, fps, aspect ratio, shot note | Left panel, below the scenes — add, duplicate, reorder, compare A/B, delete |
+| **Blocking** | keyframes per track (position and orientation separately) | Timeline and inspector |
+| **Export** | one or several shots into video, stills, and a shot list | **Ekspor video** dialog |
+
+Two consequences worth knowing before you start:
+
+- Changing a shot never changes another shot's keyframes. Adding or removing an actor, on the
+  other hand, affects the whole scene — actors belong to the scene, their motion belongs to
+  the shot.
+- Everything is autosaved. There is no Save button for normal work; the header states the real
+  status, and the **Simpan** button exists to download a JSON copy, not to persist.
 
 ### 1. Arrange the scene
 
@@ -257,9 +284,14 @@ source (never overwritten), its raw backup, the migration marker, the active pro
 writer heartbeat, and the synchronous hand-off written when a tab closes before its last
 transaction commits.
 
-The current document schema is version `2` (`Project → Scene → Shot`); see
-[docs/DATA-MODEL.md](docs/DATA-MODEL.md). Version 1 files are migrated on load into one project
-with one scene and one shot, without changing a single pose. Older files without lock,
+The current document schema is version `3` (`Project → Scene → Shot`); see
+[docs/DATA-MODEL.md](docs/DATA-MODEL.md). Version 1 and version 2 files are migrated on load
+through the chain v1 → v2 → v3, copy-first: the source is never mutated, a raw backup is kept,
+and the upgraded document is written back once. Version 1 becomes one project with one scene
+and one shot; version 2 gains separate position and rotation tracks and identified props. No
+migration changes a single pose — equivalence is proven against the phase 0 golden poses to a
+tolerance of 1e-9, not by inspection. A document with a *newer* schema is never opened and
+never overwritten. Older files without lock,
 visibility, or door fields are normalized. Invalid IDs, duplicate timestamps, out-of-range
 values, malformed doors, cross-scene references, and broken camera targets are rejected before
 anything is stored.
@@ -290,6 +322,8 @@ Important persistence behavior:
 - Undo history exists only in memory and resets after a page reload; recovery snapshots are separate and survive reloads.
 - Browser storage is not a permanent backup and can be cleared by the user or the browser.
 - Export a project package or a JSON backup before making large or experimental changes.
+- If a save fails, the app keeps the document in memory, says so plainly, and offers a backup download instead of claiming the work is safe.
+- Session state (active scene and shot, selection, playhead, observer pose) is stored per project. Navigation changes are written immediately; the playhead and observer pose are throttled, because they change every frame.
 
 ## Video export
 
@@ -398,6 +432,7 @@ Key design rules:
 │   ├── no-webgl.js            # Fallback screen when WebGL2 is unavailable
 │   ├── metrics.js             # Local-only metrics with a closed property schema
 │   ├── flags.js               # Local feature flags (dashboard flag for the pilot)
+│   ├── build-info.js          # Build version and commit hash injected by Vite `define`
 │   ├── model.js               # Demo project, keyframe sampling, version 1 validation
 │   ├── history.js             # Bounded undo/redo project snapshots
 │   ├── spatial.js             # Walk cycle, door geometry, wall-crossing checks
@@ -414,8 +449,11 @@ Key design rules:
 │   ├── dashboard-browser.mjs  # Dashboard, scenes, trash, package import/export
 │   ├── capability-browser.mjs # Context loss, no-WebGL fallback, metrics, flags, v1 export
 │   ├── a11y-browser.mjs       # Accessibility audit: names, focus, contrast, touch targets
-│   ├── gate-r1-browser.mjs    # Release-gate bug hunt: lock bypass, data loss, migration
+│   ├── shot-timeline-browser.mjs # Shots, timeline, props, modular walls, interpolation
+│   ├── gate-r1-browser.mjs    # Release-gate R1 bug hunt: lock bypass, data loss, migration
 │   ├── export-browser.mjs     # Deterministic export: 300 frames, frame equivalence, cancel
+│   ├── gate-r2-browser.mjs    # Release-gate R2 bug hunt: preview/export, shot isolation
+│   ├── preview-check.mjs      # Production build check (needs the preview server, not dev)
 │   └── perf-browser.mjs       # Performance harness (input latency, playback, open, memory)
 ├── docs/
 │   ├── PRD.md                 # Product requirements and release scope
@@ -426,6 +464,9 @@ Key design rules:
 │   ├── BROWSER-SUPPORT.md     # Support matrix derived from capability detection
 │   ├── ROLLOUT.md             # Feature flag, migration backups, rollback procedure
 │   ├── GATE-R1.md             # Release gate R1 evidence matrix (PR-01…PR-07)
+│   ├── GATE-R2.md             # Release gate R2 evidence matrix (SH/TL/SC/CA/EX + R1 recheck)
+│   ├── DECISIONS-NEEDED.md    # Open decisions D-01…D-07, pilot needs, phase 7/8 prerequisites
+│   ├── SPIKE-ENCODER.md       # Codec/muxer probe results behind the export design
 │   ├── PILOT-PROTOCOL.md      # Pilot task protocol (prepared, not yet run)
 │   └── handoff/               # Per-phase implementation reports
 ├── plan.md                    # Phased implementation plan derived from the PRD
@@ -441,7 +482,7 @@ Key design rules:
 npm test
 ```
 
-The unit suite covers interpolation, time clamping, keyframe replacement, project validation, legacy defaults, history behavior, deterministic walking, doorway panels, wall-crossing detection, and projects without a camera.
+177 tests. The unit suite covers interpolation and per-track sampling (linear/hold/ease), time clamping, keyframe replacement, schema v3 validation, the v1 → v2 → v3 migration chain and its equivalence against the phase 0 golden poses, the repository and its transactions (with a hand-written in-memory IndexedDB so no dependency is added), autosave coalescing and revision tokens, session state, the tab lock, dashboard routing and project operations, package checksums, shot operations, timeline view maths, local metrics, rollback exports, load fixtures, and the export pipeline down to the bytes the WebM muxer writes.
 
 ### Production build
 
@@ -465,7 +506,21 @@ Terminal 2:
 npm run test:browser
 ```
 
-Browser tests write screenshots, JSON fixtures, and test videos to `artifacts/`, which is ignored by Git. They cover the main Three.js workflow, keyframes, camera preview, lock/hide safety, direct viewport manipulation, undo/redo grouping, project round-trips, procedural walking, real doorway geometry, deletion, empty-camera recovery, responsive overflow, video download, version 1 migration, atomic autosave and recovery snapshots, multi-tab isolation, the dashboard journey (create, add scene, switch project, reload, duplicate, trash restore, package round-trip, legacy import, 44 px touch targets, 390 px layout), WebGL context loss and recovery, the no-WebGL fallback, local metrics, the dashboard feature flag, version 1 export for rollback, the accessibility audit, the shot and timeline suite (mode cue, isolated shot alternatives, bulk keyframe editing with one undo, frame snapping and clamping, snap grid, deterministic walking, doors, deleted camera targets, shots without a camera), a release-gate bug hunt for lock bypass and data loss, and the deterministic export suite (export dialog capability lists, 300 frames at exactly 10.000 seconds verified with `ffprobe`, first/middle/last frame equivalence against the preview, hidden objects, immutable snapshots, codec failure, cancellation, missing camera, range limits, batch queue with burn-in, storyboard and shot list, and the labelled real-time fallback).
+`npm run test:browser` runs 12 suites in sequence. Browser tests write screenshots, JSON fixtures, and test videos to `artifacts/`, which is ignored by Git. They cover the main Three.js workflow, keyframes, camera preview, lock/hide safety, direct viewport manipulation, undo/redo grouping, project round-trips, procedural walking, real doorway geometry, deletion, empty-camera recovery, responsive overflow, video download, version 1 migration, atomic autosave and recovery snapshots, multi-tab isolation, the dashboard journey (create, add scene, switch project, reload, duplicate, trash restore, package round-trip, legacy import, 44 px touch targets, 390 px layout), WebGL context loss and recovery, the no-WebGL fallback, local metrics, the dashboard feature flag, version 1 export for rollback, the accessibility audit, the shot and timeline suite (mode cue, isolated shot alternatives, bulk keyframe editing with one undo, frame snapping and clamping, snap grid, deterministic walking, doors, deleted camera targets, shots without a camera), a release-gate bug hunt for lock bypass and data loss, the deterministic export suite (export dialog capability lists, 300 frames at exactly 10.000 seconds verified with `ffprobe`, first/middle/last frame equivalence against the preview, hidden objects, immutable snapshots, codec failure, cancellation, missing camera, range limits, batch queue with burn-in, storyboard and shot list, and the labelled real-time fallback), and the release gate R2 hunt (preview/export equivalence across 9:16, 2.39:1, 24 fps, hidden actors, props and modular walls, and burn-in; lock enforcement through bulk keyframe moves, paste, delete and marker drags as well as through props and walls; shot A/B isolation surviving undo, redo and a full reload; no data loss when the tab reloads mid-export; and a codec failure driven through the dialog).
+
+Two suites are run three times in a row for the gate — `repository-browser` and `export-browser` — because both were flaky at some point, and a flaky gate cannot be used as a gate.
+
+### Production build verification
+
+The production build is checked against the preview server rather than the dev server:
+
+```bash
+npm run build
+npm run preview -- --port 4174 --strictPort   # terminal 1
+node tests/preview-check.mjs                  # terminal 2
+```
+
+This rejects every page error, every console error, and every HTTP response of 400 or above — including requests the browser makes on its own — and confirms the build version is visible and identical in the editor and the dashboard. It is not part of `npm run test:browser` because it needs a different server.
 
 ### Performance harness
 
@@ -473,7 +528,7 @@ Browser tests write screenshots, JSON fixtures, and test videos to `artifacts/`,
 npm run test:perf
 ```
 
-Measures input-to-viewport latency, 60 second playback frame times, project open time, dashboard reads, and GPU resource trends against the load fixture. It writes `artifacts/perf-baseline.json` and asserts nothing: measured numbers and their limits are recorded in [docs/PERF-BASELINE.md](docs/PERF-BASELINE.md).
+Measures input-to-viewport latency, 60 second playback frame times, project open time, dashboard reads, and GPU resource trends against the load fixture. Set `PERF_LABEL="<device>"` to name the run. It writes `artifacts/perf-baseline.json` and **asserts nothing**: deciding whether a target is met is a human judgement recorded alongside the device in [docs/PERF-BASELINE.md](docs/PERF-BASELINE.md), where the numbers are listed before and after schema v3.
 
 Tested locally during prototype development with Node.js 22 and stable Chrome on macOS. Passing these tests does not yet certify every browser, mobile interaction, accessibility target, or GPU configuration. Screen reader behavior, Edge, Safari, Firefox, and lower-end hardware remain unverified — see [docs/BROWSER-SUPPORT.md](docs/BROWSER-SUPPORT.md) and [docs/A11Y-AUDIT.md](docs/A11Y-AUDIT.md).
 
@@ -503,11 +558,13 @@ The detailed roadmap lives in [plan.md](plan.md), with product rationale and acc
 | R0 | Safe editor: history, lock, visibility, rotation, final-view editing | Implemented baseline |
 | R0.1 | Procedural walking, full item deletion, door openings, wall warnings | Implemented baseline |
 | R1 | Local project dashboard, multiple scenes, IndexedDB, autosave recovery, trash, import/export packages | Implemented; release gate passed |
-| R2 | Shot list, isolated cameras/tracks, advanced timeline, props, cinematic formats, deterministic export | Implemented; release gate R2 outstanding |
+| R2 | Shot list, isolated cameras/tracks, advanced timeline, props, cinematic formats, deterministic export | Implemented; [release gate R2 passed](docs/GATE-R2.md) |
 | R3 | Optional cloud sync, revision history, roles, immutable review links, timestamp comments | Conditional on validation |
 | Exploration | GLB/rigs, audio cues, floor-plan underlays, continuity tools, AI-assisted blocking | Research backlog |
 
-Schema version 3 has shipped: one migration carries separate position/rotation tracks, hold/ease interpolation, prop entities, and modular walls together. Deterministic export (phase 5) has shipped as well. The immediate next work is release gate R2 and the pilot. See `plan.md` and `docs/DATA-MODEL.md` section 8.
+Schema version 3 has shipped: one migration carries separate position/rotation tracks, hold/ease interpolation, prop entities, and modular walls together. Deterministic export (phase 5) has shipped as well, and both release gates have passed.
+
+**The next step is not a feature.** It is the pilot with 5–8 filmmakers (F6-10/F6-11), and three things must happen first: test Edge, re-measure performance on a PRD-class laptop (8 GB RAM, integrated GPU), and decide whether MP4 is required. Everything needed to start — and every decision that is still open — is written down in [docs/DECISIONS-NEEDED.md](docs/DECISIONS-NEEDED.md). No phase 7 (cloud) or phase 8 (exploration) work has been started, deliberately.
 
 ## Contributing
 
@@ -550,8 +607,18 @@ Even so, local browser data is not a secure archive. Do not place confidential p
 ## Documentation
 
 - [Product requirements](docs/PRD.md) — product scope, acceptance criteria, data model, rollout, risks, and future features.
-- [Implementation plan](plan.md) — phased engineering tasks and quality gates.
+- [Implementation plan](plan.md) — phased engineering tasks, quality gates, and the execution log with evidence for every completed task.
+- [Decisions needed](docs/DECISIONS-NEEDED.md) — **start here if you own the product.** Status of decisions D-01…D-07, what is required to run the pilot, concrete options with trade-offs for the cloud phase (no vendor chosen), and how to start each exploration item.
+- [Release gate R1](docs/GATE-R1.md) — evidence matrix for PR-01…PR-07 (projects, storage, tabs).
+- [Release gate R2](docs/GATE-R2.md) — evidence matrix for SH-01, TL-01, TL-02, SC-01, CA-01, EX-01…EX-03, the bugs found and fixed, and the limits of what the gate proves.
+- [Data model](docs/DATA-MODEL.md) — schema v3 contract, invariants, migration rules, and every place a stored document is read.
+- [Performance baseline](docs/PERF-BASELINE.md) — reference device, metric definitions, and measured numbers before and after schema v3.
+- [Accessibility audit](docs/A11Y-AUDIT.md) and [browser support](docs/BROWSER-SUPPORT.md) — what was tested and what is only inferred.
+- [Rollout and rollback](docs/ROLLOUT.md) — build verification, feature flag, backups, and the downgrade paths.
+- [Pilot protocol](docs/PILOT-PROTOCOL.md) — participant criteria, tasks, and decision criteria fixed *before* the pilot.
+- [Encoder spike](docs/SPIKE-ENCODER.md) — codec probe results behind the export design.
 - [Current audit](docs/AUDIT.md) — implemented behavior, regression evidence, limitations, and priorities.
+- [Handoff reports](docs/handoff/) — one report per phase, each with its own risks and limits of conclusion.
 
 ## License
 

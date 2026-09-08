@@ -20,6 +20,7 @@ import {setActiveProjectId} from './storage.js';
 import {projectWriterStatus} from './tab-lock.js';
 import {buildPackage, isPackage, packageFileName, readPackage, MAX_PACKAGE_BYTES} from './package.js';
 import {stamp, trashRemaining, uniqueTitle} from './dashboard-support.js';
+import {buildLabel, buildTitle} from './build-info.js';
 
 const icons = {Box, Plus, Search, Trash2, RotateCcw, Copy, PencilLine, FolderOpen, Download, Film, ArrowLeft, TriangleAlert};
 const icon = name => `<i data-lucide="${name}"></i>`;
@@ -115,6 +116,10 @@ export async function mountDashboard({
     </div>
   </section>
   <section id="dash-list" class="dash-grid" aria-live="polite"></section>
+  <footer class="dash-footer">
+    <span>Blocking Room — previs lokal di browser. Data tersimpan di perangkat ini (IndexedDB).</span>
+    <span class="build-badge" id="build-version" title="${esc(buildTitle())}">${esc(buildLabel())}</span>
+  </footer>
 </main>
 <input type="file" accept=".json,application/json" id="dash-file" hidden/>
 <div class="toast" role="status" id="dash-toast"></div>`;

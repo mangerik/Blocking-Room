@@ -38,7 +38,7 @@ dengan pembaca layar dan pengguna sungguhan.
 | Status tidak bergantung warna saja | lock/hidden/simpan punya teks + ikon | — | **Lulus** |
 | Tidak ada overflow horizontal pada 390 px | tidak ada | tidak ada | **Lulus** |
 | Kontras teks ≥4,5:1 (≥3:1 teks besar) | 0 gagal (dari 56 sebelum perbaikan) | 0 gagal (dari 5) | **Lulus** |
-| Touch target inti ≥44 px pada layout sentuh | 10 sisa, semuanya penanda keyframe (T-01) | 0 sisa | **Lulus sebagian** |
+| Touch target inti ≥44 px pada layout sentuh | 10 sisa pada gate R1, **17 sisa pada gate R2** — seluruhnya penanda keyframe (T-01) | 0 sisa | **Lulus sebagian** |
 
 ## 3. Temuan yang sudah diperbaiki pada F6-04
 
@@ -93,7 +93,8 @@ tampilannya, sebaliknya tidak boleh.
 **Layout desktop tidak diubah**: 55 kontrol masih <44 px pada 1440 px, dan itu memang
 disengaja — 44 px adalah target sentuh PRD untuk **layout sentuh**, sedangkan ambang WCAG
 2.2 AA "Target Size (Minimum)" adalah 24 px. Kontrol desktop yang masih di bawah 24 px
-hanya tiga jenis: penanda keyframe 10 × 10 px (T-01), pilihan warna 22 × 22 px dan tombol
+hanya tiga jenis: penanda keyframe 10 × 10 px (posisi/pose) dan 7 × 7 px (orientasi) —
+T-01 — pilihan warna 22 × 22 px dan tombol
 "Edit final view" setinggi 22 px (T-02). Seluruh kontrol dashboard pada desktop ≥36 px.
 
 ## 4. Temuan yang BELUM lulus
@@ -111,9 +112,17 @@ dan menghapus keyframe tersedia sebagai tombol besar di inspector ("Simpan keyfr
 X.Xs" / "Hapus keyframe"); playhead dapat digeser dengan slider `#scrub` yang tingginya
 44 px pada layout sentuh.
 
-Perbaikan yang benar bukan memperbesar penanda, melainkan mode edit timeline dengan
-zoom/pan dan multi-select — itu **TL-01, Fase 4**. Sampai itu ada, temuan ini tetap
-terbuka dan tidak boleh diklaim lulus.
+**Pembaruan gate R2 (8 September 2026).** TL-01 sudah mendarat (zoom/pan, multi-select,
+snapping ke frame), tetapi temuan ini **tetap terbuka dan jumlahnya naik dari 10 menjadi
+17** pada 390 px. Penyebabnya schema v3: setiap aktor kini punya dua lane (posisi dan
+orientasi), dan penanda orientasi digambar sebagai lingkaran berongga 7 × 7 px — lebih
+kecil daripada penanda posisi 10 × 10 px. Pembedaan posisi vs orientasi memakai **bentuk**,
+bukan warna, sehingga tidak bergantung pada persepsi warna.
+
+Perbaikan yang benar tetap bukan memperbesar penanda pada lane setinggi 19 px, melainkan
+desain ulang lane timeline (mis. mode “edit keyframe” dengan lane yang lebih tinggi dan
+penanda yang dapat disentuh). Sampai itu ada, temuan ini tidak boleh diklaim lulus.
+Dicatat juga sebagai `docs/GATE-R2.md` C-01.
 
 ### T-02 · Pilihan warna dan "Edit final view" di bawah 24 px pada desktop
 

@@ -130,6 +130,42 @@ test('session state disimpan per proyek dan dipulihkan dengan fallback aman', as
   assert.equal(restoreSession(doc, {observerPose: {x: 'x'}}).observerPose, null);
 });
 
+test('perpindahan scene/shot/seleksi menembus throttle session state', async () => {
+  const writes = [];
+  let clock = 100000;
+  const repo = {putSession: state => {writes.push({...state}); return Promise.resolve();}};
+  const tracker = new SessionTracker({repository: repo, throttle: 1000, now: () => clock});
+  const base = {projectId: 'p1', sceneId: 's1', shotId: 'h1', selectedId: 'a1', observerPose: null, activeTool: 'orbit'};
+
+  tracker.record({...base, playhead: 0});
+  assert.equal(writes.length, 1, 'catatan pertama ditulis langsung');
+
+  // Playhead dan pose observer tetap dilindungi throttle: keduanya berubah tiap frame.
+  clock = 100010; tracker.record({...base, playhead: 0.2});
+  clock = 100020; tracker.record({...base, playhead: 0.4});
+  assert.equal(writes.length, 1, 'playhead tidak boleh membanjiri IndexedDB');
+
+  // Pindah shot lalu reload dalam <1 detik harus memulihkan shot yang benar.
+  clock = 100030; tracker.record({...base, shotId: 'h2', playhead: 0.4});
+  assert.equal(writes.length, 2, 'perpindahan shot ditulis seketika');
+  assert.equal(writes[1].shotId, 'h2');
+
+  clock = 100040; tracker.record({...base, shotId: 'h2', selectedId: 'a2', playhead: 0.4});
+  assert.equal(writes.length, 3, 'perubahan seleksi ditulis seketika');
+  assert.equal(writes[2].selectedId, 'a2');
+
+  clock = 100050; tracker.record({...base, sceneId: 's2', shotId: 'h2', selectedId: 'a2', playhead: 0.4});
+  assert.equal(writes.length, 4, 'perpindahan scene ditulis seketika');
+  assert.equal(writes[3].sceneId, 's2');
+
+  // Timer throttle yang masih menggantung tidak boleh menulis state basi sesudahnya.
+  clock = 100060; tracker.record({...base, sceneId: 's2', shotId: 'h2', selectedId: 'a2', playhead: 1.2});
+  await tracker.flush();
+  assert.equal(writes.length, 5);
+  assert.equal(writes[4].playhead, 1.2);
+  assert.equal(writes[4].sceneId, 's2');
+});
+
 test('autosave menggabungkan banyak jadwal menjadi satu transaksi', async () => {
   const writes = [];
   const repo = {saveDocument: (doc, options) => {writes.push({title: doc.title, ...options}); return Promise.resolve({revisionId: options.revision ? 'r' : null, skipped: false});}};
