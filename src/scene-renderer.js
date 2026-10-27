@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {wallPanels} from './spatial.js';
 import {aspectValue, aspectSize, sampleScene} from './timeline-engine.js';
+import {describeShotReference} from './shot-reference.js';
 
 export class SceneRenderer {
   /**
@@ -66,11 +67,11 @@ export class SceneRenderer {
     sun.shadow.normalBias = .04;
     this.scene.add(sun);
 
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(160, 160), new THREE.MeshStandardMaterial({color: '#eeeee7', roughness: 1}));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -.09;
-    ground.receiveShadow = true;
-    this.scene.add(ground);
+    this.ground = new THREE.Mesh(new THREE.PlaneGeometry(160, 160), new THREE.MeshStandardMaterial({color: '#eeeee7', roughness: 1}));
+    this.ground.rotation.x = -Math.PI / 2;
+    this.ground.position.y = -.09;
+    this.ground.receiveShadow = true;
+    this.scene.add(this.ground);
     this.grid = new THREE.GridHelper(90, 90, '#d1d5c6', '#dfe2d6');
     this.grid.position.y = -.075;
     this.scene.add(this.grid);
@@ -137,6 +138,7 @@ export class SceneRenderer {
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    this.theme = 'light';
   }
 
   get canvas() {return this.renderer.domElement;}
@@ -476,6 +478,93 @@ export class SceneRenderer {
     return true;
   }
 
+  /** Menyelaraskan permukaan 3D dengan tema aplikasi tanpa menyentuh data scene. */
+  setTheme(theme) {
+    const dark = theme === 'dark';
+    this.theme = dark ? 'dark' : 'light';
+    const canvas = dark ? '#151619' : '#eeeee7';
+    this.scene.background.set(canvas);
+    this.scene.fog.color.set(canvas);
+    this.renderer.setClearColor(canvas);
+    // Preview/final dan ekspor adalah output kreatif, bukan chrome aplikasi.
+    // Warnanya harus identik di light/dark mode.
+    this.povBackground.set('#dbdfd1');
+    this.ground.material.color.set(dark ? '#1b1f1a' : '#eeeee7');
+    this.renderer.toneMappingExposure = 1.15;
+    this.povRenderer.toneMappingExposure = 1.15;
+
+    // GridHelper menyimpan warna per-vertex; membuat ulang lebih aman daripada
+    // menimpa satu material yang tidak mewakili dua warna garisnya.
+    const visible = this.grid?.visible !== false;
+    if (this.grid) {
+      this.scene.remove(this.grid);
+      this.grid.geometry.dispose();
+      this.grid.material.dispose();
+    }
+    this.grid = new THREE.GridHelper(90, 90, dark ? '#4b4f57' : '#d1d5c6', dark ? '#292c31' : '#dfe2d6');
+    this.grid.position.y = -.075;
+    this.grid.visible = visible;
+    this.scene.add(this.grid);
+    this.lastPovAt = -Infinity;
+  }
+
+  /**
+   * Zoom observer yang tetap aktif saat tool transform mematikan OrbitControls.
+   * Posisi bergerak sepanjang garis kamera → target, jadi arah pandang dan titik
+   * orbit tidak berubah. Ini cocok untuk roda mouse maupun scroll trackpad.
+   */
+  zoomObserver(deltaY) {
+    if (this.viewMode === 'camera' || !Number.isFinite(deltaY) || deltaY === 0) return false;
+    const offset = this.observer.position.clone().sub(this.controls.target);
+    const distance = offset.length();
+    if (!distance) return false;
+    const scale = Math.exp(Math.max(-160, Math.min(160, deltaY)) * .0022);
+    const next = Math.max(this.controls.minDistance, Math.min(this.controls.maxDistance, distance * scale));
+    if (Math.abs(next - distance) < .0001) return false;
+    this.observer.position.copy(this.controls.target).add(offset.multiplyScalar(next / distance));
+    this.controls.update();
+    return true;
+  }
+
+  /**
+   * Mengukur framing kamera final pada subjek utama frame aktif. Kamera yang
+   * mengikuti karakter selalu memakai karakter itu; selainnya dipilih karakter
+   * terlihat yang paling dekat dengan pusat optik.
+   */
+  analyzeShot(view, time) {
+    const frame = sampleScene(view, time);
+    if (!frame.camera) return null;
+    const candidates = frame.actors.filter(actor => actor.visible).map(actor => {
+      const source = view.actors.find(item => item.id === actor.id);
+      if (!source) return null;
+      const bottom = new THREE.Vector3(actor.pose.x, .07, actor.pose.z).project(this.camera);
+      const top = new THREE.Vector3(actor.pose.x, source.height + .07, actor.pose.z).project(this.camera);
+      const center = new THREE.Vector3(actor.pose.x, source.height * .52, actor.pose.z).project(this.camera);
+      const coverage = Math.abs(top.y - bottom.y) / 2;
+      return {actor, source, center, coverage, score: Math.hypot(center.x, center.y) + (center.z > 1 ? 10 : 0)};
+    }).filter(Boolean);
+    if (!candidates.length) return null;
+    const followed = frame.camera.following && candidates.find(item => item.actor.id === frame.camera.following);
+    const subject = followed ?? candidates.sort((a, b) => a.score - b.score)[0];
+    const subjectCenter = new THREE.Vector3(subject.actor.pose.x, subject.source.height * .52, subject.actor.pose.z);
+    const cameraPosition = new THREE.Vector3(frame.camera.pose.x, frame.camera.pose.y, frame.camera.pose.z);
+    const cameraToSubject = subjectCenter.clone().sub(cameraPosition);
+    const distance = cameraToSubject.length();
+    const elevation = THREE.MathUtils.radToDeg(Math.asin(cameraToSubject.y / Math.max(distance, .0001)));
+    const subjectToCamera = cameraPosition.clone().sub(subjectCenter);
+    const cameraHeading = THREE.MathUtils.radToDeg(Math.atan2(subjectToCamera.x, subjectToCamera.z));
+    const relativeFacing = cameraHeading - subject.actor.pose.r;
+    return describeShotReference({
+      subjectName: subject.source.name,
+      coverage: subject.coverage,
+      distance,
+      cameraHeight: frame.camera.pose.y,
+      focal: frame.camera.focal,
+      elevation,
+      relativeFacing,
+    });
+  }
+
   resetView(top = false) {
     this.observer.position.set(...(top ? [0, 38, .01] : [16, 17, 21]));
     this.controls.target.set(0, 0, -1);
@@ -532,7 +621,13 @@ export class SceneRenderer {
       return;
     }
     const oldBackground = this.scene.background;
+    const oldFog = this.scene.fog.color.clone();
+    const oldGround = this.ground.material.color.clone();
+    const oldExposure = targetRenderer.toneMappingExposure;
     this.scene.background = this.povBackground;
+    this.scene.fog.color.set('#eeeee7');
+    this.ground.material.color.set('#eeeee7');
+    targetRenderer.toneMappingExposure = 1.15;
     this.pathsGroup.visible = keepOverlays && this.paths;
     this.helper.visible = false;
     this.cameraMarker.visible = false;
@@ -556,6 +651,9 @@ export class SceneRenderer {
     materialState.forEach(([m, opacity]) => {m.opacity = opacity; m.transparent = true; m.depthWrite = false;});
     rings.forEach(([o, visible]) => {o.visible = visible;});
     this.scene.background = oldBackground;
+    this.scene.fog.color.copy(oldFog);
+    this.ground.material.color.copy(oldGround);
+    targetRenderer.toneMappingExposure = oldExposure;
     this.pathsGroup.visible = this.paths;
     const markerVisible = view.camera.visible !== false;
     this.helper.visible = markerVisible;
@@ -682,7 +780,10 @@ export class SceneRenderer {
       if (!hit.object.isMesh) continue;
       let object = hit.object, root = null, visible = true;
       while (object) {
-        if (!object.visible || object.name === 'direction' || object.name === 'selection') visible = false;
+        // Ring seleksi adalah target drag yang sengaja lebih besar daripada mesh.
+        // Sebelumnya ring dikecualikan sehingga pengguna harus mengenai badan objek
+        // yang kecil dengan sangat presisi dan transform terasa hanya ada di sidebar.
+        if (!object.visible || object.name === 'direction') visible = false;
         if (object === this.cameraMarker) root = 'camera';
         if (object.userData.id) root = object.userData.id;
         object = object.parent;

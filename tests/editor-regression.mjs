@@ -10,6 +10,44 @@ const drag=async(p,dx,dy)=>{await page.mouse.move(p.x,p.y);await page.mouse.down
 const blur=()=>page.locator('#inspector-name').click();
 const change=async(prop,value)=>{await page.locator(`[data-prop="${prop}"]`).fill(String(value));await page.locator(`[data-prop="${prop}"]`).press('Tab');};
 const original=await state();
+// Bar proyek besar dipadatkan ke header; referensi shot berasal dari frame kamera aktif.
+assert.equal(await page.locator('.project-bar').count(),0);
+assert.ok((await page.locator('#shot-prompt').inputValue()).includes('Alex'));
+const shotReference=await page.evaluate(()=>window.blockingRoom.getShotReference());
+assert.ok(shotReference.distance>0&&shotReference.focal===35&&shotReference.shotSize);
+// Dark mode mengubah chrome + renderer, tidak menyentuh dokumen kreatif.
+assert.equal((await page.evaluate(()=>window.blockingRoom.getTheme())).theme,'light');
+const previewPixels=()=>page.evaluate(()=>{const source=document.querySelector('#camera-preview canvas'),canvas=document.createElement('canvas');canvas.width=source.width;canvas.height=source.height;const context=canvas.getContext('2d');context.drawImage(source,0,0);const data=context.getImageData(0,0,canvas.width,canvas.height).data;let hash=2166136261;for(const byte of data){hash^=byte;hash=Math.imul(hash,16777619);}return {width:canvas.width,height:canvas.height,hash:hash>>>0};});
+const themeInvariantPreview=await previewPixels();
+await page.locator('#theme-toggle').click();
+assert.deepEqual(await page.evaluate(()=>window.blockingRoom.getTheme()),{theme:'dark',scene:'#151619',ground:'#1b1f1a'});
+assert.equal(await page.locator('#theme-toggle').getAttribute('aria-pressed'),'true');
+assert.deepEqual(await state(),original);
+assert.deepEqual(await previewPixels(),themeInvariantPreview,'tema UI tidak boleh mengubah preview/final kamera');
+await page.locator('#theme-toggle').click();
+assert.equal((await page.evaluate(()=>window.blockingRoom.getTheme())).theme,'light');
+const editorLayout=await page.evaluate(()=>Object.fromEntries([
+  ['heading','.left-panel>.panel-heading'],['notes','#shot-notes'],['timeline','.timeline-head'],
+].map(([key,selector])=>{const rect=document.querySelector(selector).getBoundingClientRect();return [key,{width:rect.width,height:rect.height}];})));
+assert.ok(editorLayout.heading.height>=39,'heading Scene Explorer harus mempertahankan tinggi panel editor');
+assert.ok(editorLayout.notes.height>=70,'catatan shot harus tetap terbaca saat panel panjang');
+assert.ok(editorLayout.timeline.height>=80,'toolbar timeline harus memiliki dua kelompok yang terbaca');
+await page.locator('#shot-notes').fill('Catatan shot uji');await page.locator('#shot-notes').press('Tab');
+assert.equal((await page.evaluate(()=>window.blockingRoom.getShots()[0].notes)),'Catatan shot uji');
+await page.locator('#undo').click();assert.equal((await page.evaluate(()=>window.blockingRoom.getShots()[0].notes)),'');
+// Label mode dan timecode tidak boleh mendorong kontrol saat frame 99 → 100.
+await page.evaluate(()=>window.blockingRoom.setFrame(98));
+const transportGeometry=()=>page.evaluate(()=>Object.fromEntries(['#rewind','#play','#record','#mode-cue','.timecode'].map(selector=>{const r=document.querySelector(selector).getBoundingClientRect();return[selector,[r.x,r.y,r.width,r.height].map(n=>Math.round(n*100)/100)];})));
+const transportBefore=await transportGeometry();await page.locator('#play').click();await page.waitForTimeout(320);const transportAfter=await transportGeometry();await page.locator('#play').click();
+assert.deepEqual(transportAfter,transportBefore,'kontrol playback tidak boleh bergeser saat label frame berubah digit');
+await page.locator('#rewind').click();
+// Scroll/trackpad tetap men-zoom observer saat OrbitControls dimatikan oleh mode Geser.
+const observerDistance=pose=>Math.hypot(pose.x-pose.targetX,pose.y-pose.targetY,pose.z-pose.targetZ);
+const observerBefore=await page.evaluate(()=>window.blockingRoom.getObserverPose());
+await page.locator('#move-tool').click();await page.locator('#viewport canvas').hover();await page.mouse.wheel(0,-320);await page.waitForTimeout(50);
+const observerAfter=await page.evaluate(()=>window.blockingRoom.getObserverPose());
+assert.ok(observerDistance(observerAfter)<observerDistance(observerBefore));
+assert.deepEqual(await state(),original);
 // Rename, undo, redo, branch invalidation; title is also part of document history.
 await change('name','Alex edit');await page.locator('#undo').click();assert.equal((await state()).actors[0].name,'Alex');await page.locator('#redo').click();assert.equal((await state()).actors[0].name,'Alex edit');
 await page.locator('#undo').click();await change('name','Alex baru');assert.equal(await page.locator('#redo').isDisabled(),true);await page.locator('#undo').click();

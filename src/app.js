@@ -21,8 +21,10 @@ import {parseRoute} from './routing.js';
 import {setActiveProjectId} from './storage.js';
 import {capabilities} from './capabilities.js';
 import {readFlag} from './flags.js';
+import {initTheme} from './theme.js';
 import './style.css';
 
+initTheme();
 const route = parseRoute(location.hash);
 
 // Navigasi antar-rute selalu memuat ulang halaman (lihat main.js/dashboard.js),

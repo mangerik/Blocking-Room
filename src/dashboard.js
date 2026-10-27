@@ -7,7 +7,7 @@
 // Rute: `#/` daftar proyek, `#/trash` tempat sampah, `#/project/<id>` editor.
 // Perpindahan ke editor memuat ulang halaman supaya kunci writer, autosave dan
 // SessionState selalu dimulai dari keadaan yang bersih (lihat src/app.js).
-import {createIcons, Box, Plus, Search, Trash2, RotateCcw, Copy, PencilLine, FolderOpen, Download, Film, ArrowLeft, TriangleAlert} from 'lucide';
+import {createIcons, Box, Plus, Search, Trash2, RotateCcw, Copy, PencilLine, FolderOpen, Download, Film, ArrowLeft, TriangleAlert, Moon, Sun} from 'lucide';
 import {StorageQuotaError, TRASH_RETENTION_DAYS} from './repository.js';
 import {bootstrapDashboard} from './bootstrap.js';
 import {cloneProjectDocument, emptyDocument} from './document.js';
@@ -21,8 +21,9 @@ import {projectWriterStatus} from './tab-lock.js';
 import {buildPackage, isPackage, packageFileName, readPackage, MAX_PACKAGE_BYTES} from './package.js';
 import {stamp, trashRemaining, uniqueTitle} from './dashboard-support.js';
 import {buildLabel, buildTitle} from './build-info.js';
+import {currentTheme, toggleTheme} from './theme.js';
 
-const icons = {Box, Plus, Search, Trash2, RotateCcw, Copy, PencilLine, FolderOpen, Download, Film, ArrowLeft, TriangleAlert};
+const icons = {Box, Plus, Search, Trash2, RotateCcw, Copy, PencilLine, FolderOpen, Download, Film, ArrowLeft, TriangleAlert, Moon, Sun};
 const icon = name => `<i data-lucide="${name}"></i>`;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 
@@ -72,6 +73,15 @@ export async function mountDashboard({
   root.innerHTML = shell();
   const $ = selector => root.querySelector(selector);
   const refreshIcons = () => createIcons({icons});
+  const renderThemeToggle = () => {
+    const dark = currentTheme() === 'dark', button = $('#dash-theme');
+    if (!button) return;
+    button.innerHTML = icon(dark ? 'sun' : 'moon');
+    button.title = dark ? 'Aktifkan light mode' : 'Aktifkan dark mode';
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('aria-pressed', String(dark));
+    refreshIcons();
+  };
 
   function notify(message) {
     const el = $('#dash-toast');
@@ -89,6 +99,7 @@ export async function mountDashboard({
     <nav class="breadcrumb" aria-label="Navigasi"><b id="dash-crumb">Semua proyek</b></nav>
   </div>
   <div class="header-actions">
+    <button class="icon" id="dash-theme" aria-label="Aktifkan dark mode">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}</button>
     <button id="dash-import" aria-label="Impor proyek atau paket">${icon('folder-open')}<span class="button-text">Impor</span></button>
     <button id="dash-trash-toggle" aria-label="Buka tempat sampah">${icon('trash-2')}<span class="button-text">Sampah</span></button>
     <button class="primary" id="dash-new" aria-label="Buat proyek baru">${icon('plus')}<span>Proyek baru</span></button>
@@ -430,6 +441,7 @@ export async function mountDashboard({
 
   $('#dash-query').oninput = event => {query = event.target.value; render();};
   $('#dash-sort').onchange = event => {sort = event.target.value; render();};
+  $('#dash-theme').onclick = () => {toggleTheme(); renderThemeToggle();};
   $('#dash-new').onclick = () => toggleNewPanel($('#dash-new-panel').hidden);
   $('#dash-cancel-new').onclick = () => toggleNewPanel(false);
   $('#dash-create').onclick = () => create();
@@ -445,6 +457,7 @@ export async function mountDashboard({
     render();
   };
 
+  renderThemeToggle();
   await load();
 
   // Kait uji (tests/dashboard-browser.mjs).

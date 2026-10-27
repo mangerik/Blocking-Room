@@ -67,6 +67,13 @@ const backToDashboard = async () => {
 await openDashboard();
 assert.equal(await page.locator('[data-state="empty"]').count(), 1, 'dashboard kosong menampilkan empty state');
 assert.match(await page.locator('[data-state="empty"]').textContent(), /Belum ada proyek/);
+assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'light');
+await page.locator('#dash-theme').click();
+assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark');
+await openDashboard();
+assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark', 'preferensi tema bertahan setelah reload');
+await page.locator('#dash-theme').click();
+assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'light');
 await page.screenshot({path: 'artifacts/dashboard-empty.png'});
 
 // ---------------------------------------------------------------- 2. buat A, tambah scene, buka B, kembali ke A

@@ -201,6 +201,19 @@ const dashboard = await auditScreen('dashboard', async page => {
   await page.waitForTimeout(400);
 });
 
+// Tema gelap diuji sebagai permukaan penuh, bukan hanya keberadaan toggle.
+await context.addInitScript(() => localStorage.setItem('blocking-room.theme', 'dark'));
+const darkEditor = await auditScreen('editor-dark', async page => {
+  await page.goto(APP);
+  await page.waitForSelector('#viewport canvas');
+  await page.waitForTimeout(800);
+});
+const darkDashboard = await auditScreen('dashboard-dark', async page => {
+  await page.goto(`${APP}#/`);
+  await page.waitForSelector('.dashboard');
+  await page.waitForTimeout(400);
+});
+
 // ---------------------------------------------------------------- status non-warna
 {
   const page = await context.newPage();
@@ -260,10 +273,12 @@ const summary = name => {
 };
 console.log(summary('editor'));
 console.log(summary('dashboard'));
+console.log(summary('editor-dark'));
+console.log(summary('dashboard-dark'));
 console.log(`padanan keyboard: ${JSON.stringify(report.keyboardEquivalents)}`);
 console.log(`kontras terendah (editor): ${JSON.stringify(report.screens.editor.contrast.slice(0, 3))}`);
 
-for (const name of ['editor', 'dashboard']) {
+for (const name of ['editor', 'dashboard', 'editor-dark', 'dashboard-dark']) {
   const screen = report.screens[name];
   assert.deepEqual(screen.unnamed, [], `${name}: setiap kontrol harus punya nama aksesibel`);
   assert.deepEqual(screen.positiveTabindex, [], `${name}: tabindex positif merusak urutan tab`);

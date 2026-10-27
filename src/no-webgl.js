@@ -12,8 +12,11 @@ import {capabilities, capabilityWarnings} from './capabilities.js';
 import {readFlag} from './flags.js';
 import {DASHBOARD_ROUTE} from './routing.js';
 import {activeProjectId} from './storage.js';
+import {createIcons, Moon, Sun} from 'lucide';
+import {currentTheme, toggleTheme} from './theme.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const icon = name => `<i data-lucide="${name}"></i>`;
 
 function download(text, name) {
   const url = URL.createObjectURL(new Blob([text], {type: 'application/json'}));
@@ -47,6 +50,7 @@ export async function mountNoWebGL({projectId = null, mount = document.querySele
     <button class="primary" id="fallback-dashboard"${readFlag('dashboard') ? '' : ' hidden'}>Buka daftar proyek</button>
     <button id="fallback-export" disabled>Unduh proyek ini (JSON)</button>
     <button class="ghost" id="fallback-retry">Coba lagi</button>
+    <button class="ghost" id="fallback-theme" aria-label="Aktifkan dark mode">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')} <span>Ganti tema</span></button>
   </div>
   <p class="fallback-status" role="status" id="fallback-status">Memeriksa penyimpanan…</p>
   <details class="fallback-details">
@@ -56,8 +60,17 @@ export async function mountNoWebGL({projectId = null, mount = document.querySele
 </main>`;
 
   const status = message => {document.querySelector('#fallback-status').textContent = message;};
+  const renderTheme = () => {
+    const dark = currentTheme() === 'dark', button = document.querySelector('#fallback-theme');
+    button.innerHTML = `${icon(dark ? 'sun' : 'moon')} <span>${dark ? 'Light mode' : 'Dark mode'}</span>`;
+    button.setAttribute('aria-label', dark ? 'Aktifkan light mode' : 'Aktifkan dark mode');
+    button.setAttribute('aria-pressed', String(dark));
+    createIcons({icons: {Moon, Sun}});
+  };
+  renderTheme();
   document.querySelector('#fallback-dashboard').onclick = () => {location.hash = DASHBOARD_ROUTE; location.reload();};
   document.querySelector('#fallback-retry').onclick = () => location.reload();
+  document.querySelector('#fallback-theme').onclick = () => {toggleTheme(); renderTheme();};
 
   let document_ = null;
   const {repository, error} = await bootstrapDashboard();
